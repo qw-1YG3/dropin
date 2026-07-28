@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { PreviewMeta } from "../_components/PreviewMeta";
+import { PreviewHeader } from "../_components/PreviewHeader";
 
 const ACTIVITY_SUGGESTIONS = [
   "Badminton",
@@ -62,7 +62,7 @@ export default function HomepageLowFi() {
 
   return (
     <main className="min-h-screen bg-white text-gray-900">
-      <PreviewMeta pageName="Homepage" stage="Low-Fidelity" version="v1" />
+      <PreviewHeader pageName="Homepage" stage="Low-Fidelity" version="V1" />
 
       {/* 1. Header — Tertiary chrome, kept minimal */}
       <header className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
