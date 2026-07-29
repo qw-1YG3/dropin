@@ -1,3 +1,40 @@
+# DropIn
+
+**Working Title**
+
+DropIn is a simple website that helps people discover nearby drop-in activities in their community.
+
+Built because we had the same problem ourselves. Finding today's activities shouldn't take 20 minutes.
+
+---
+
+## Status
+
+🚧 In Active Development
+
+Current Progress
+
+- ✅ Product Vision
+- ✅ Homepage IA
+- ✅ Homepage Low-Fidelity
+- 🚧 Homepage High-Fidelity
+
+---
+
+## Product Goal
+
+Help people quickly discover nearby drop-in activities and make a confident decision within seconds.
+
+---
+
+## Design Philosophy
+
+See:
+
+docs/PRODUCT_PRINCIPLES.md
+
+---
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
