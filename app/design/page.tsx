@@ -20,7 +20,7 @@ const DESIGN_PREVIEWS: ScreenGroup[] = [
   },
   {
     screen: "Results Page",
-    previews: [],
+    previews: [{ label: "Low-Fidelity V1", href: "/design/results-lowfi" }],
   },
   {
     screen: "Activity Detail",
