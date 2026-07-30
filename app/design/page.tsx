@@ -23,6 +23,7 @@ const DESIGN_PREVIEWS: ScreenGroup[] = [
     previews: [
       { label: "Low-Fidelity V1", href: "/design/results-lowfi" },
       { label: "Card Layout Exploration", href: "/design/results-card-variations" },
+      { label: "High-Fidelity V1", href: "/design/results-highfi" },
     ],
   },
   {

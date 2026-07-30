@@ -99,3 +99,6 @@ All design explorations live under `/design`, each as its own route (e.g. `/desi
 
 - 2026-07-29 — Replaced the initial workflow structure with this expanded version: added General Principles, the Product Workflow discussion stages, Collaboration Rules, and an explicit phase-based Roadmap. One substantive change worth flagging under the Collaboration Rules above: the prior Design Workflow had 6 stages with two separate Review checkpoints (after Low-Fidelity, and after High-Fidelity, before Production Build). This version consolidates to a single Review & Refinement stage positioned after High-Fidelity. Proceeding on the assumption this consolidation is intentional; flagging it since the Homepage work already completed did receive an explicit review checkpoint before High-Fidelity began, under the prior process. Also preserved the Preview Environment section from the prior version, since it documents the still-current `/design` route convention and wasn't restated here.
 - 2026-07-29 — Added the Decision Principle section: when multiple solutions exist, prefer the one that keeps the user experience simplest, even at the cost of fewer features. Placed directly after General Principles since it governs how tradeoffs get resolved everywhere else in this document.
+
+
+
