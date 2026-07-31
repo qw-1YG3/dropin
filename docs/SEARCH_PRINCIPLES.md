@@ -48,9 +48,9 @@ What belongs in MVP versus what's intentionally deferred:
 
 ## Placeholder
 
-**Recommended:** `Search activities, centres or postal codes`
+**Recommended:** `Search activities or locations`
 
-This names the searchable categories directly so a first-time user understands scope immediately. Examples (e.g. "try 'badminton' or 'M2N'") mattered more when the box was activity-only and needed to reassure about typo-forgiveness; now that the box accepts multiple input types, communicating *breadth* is the more important onboarding job, and naming the categories does that more directly than examples would.
+Finalized during the Design Consistency Sprint as shorter than the originally proposed `Search activities, centres or postal codes` — still communicates breadth (activity vs. location), without listing every location sub-type. Used identically on Homepage and Results, since Search is one shared capability, not two.
 
 ## Decision Principle
 

@@ -22,6 +22,54 @@ export function SearchIcon({ className }: IconProps) {
   );
 }
 
+export function InfoIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <line x1="12" y1="11" x2="12" y2="16.5" />
+      <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function DirectionsIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M3 11l8-8 8 8" />
+      <path d="M11 3v18" />
+    </svg>
+  );
+}
+
+export function PhoneIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M5 4h3.2l1.5 4.3-2 1.6a11 11 0 0 0 5.4 5.4l1.6-2 4.3 1.5V18a2 2 0 0 1-2.2 2C10.5 19.5 4.5 13.5 3 7.2A2 2 0 0 1 5 4z" />
+    </svg>
+  );
+}
+
+export function LinkIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M10 13a4.5 4.5 0 0 0 6.4 0l2.1-2.1a4.5 4.5 0 0 0-6.4-6.4L10.5 6" />
+      <path d="M14 11a4.5 4.5 0 0 0-6.4 0L5.5 13a4.5 4.5 0 0 0 6.4 6.4L13.5 18" />
+    </svg>
+  );
+}
+
+export function ShareIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="6" cy="12" r="2.3" />
+      <circle cx="17.5" cy="5.5" r="2.3" />
+      <circle cx="17.5" cy="18.5" r="2.3" />
+      <line x1="8" y1="10.8" x2="15.5" y2="6.7" />
+      <line x1="8" y1="13.2" x2="15.5" y2="17.3" />
+    </svg>
+  );
+}
+
 export function LocationIcon({ className }: IconProps) {
   return (
     <svg {...base} className={className}>

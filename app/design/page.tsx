@@ -12,27 +12,27 @@ type ScreenGroup = {
 
 const DESIGN_PREVIEWS: ScreenGroup[] = [
   {
-    screen: "Homepage",
+    screen: "Search Surface",
+    previews: [{ label: "High-Fidelity V1", href: "/design/search-surface" }],
+  },
+  {
+    screen: "Map View",
+    previews: [],
+  },
+  {
+    screen: "Legacy: Homepage (superseded by Search Surface)",
     previews: [
       { label: "Low-Fidelity V1", href: "/design/homepage-lowfi" },
       { label: "High-Fidelity V1", href: "/design/homepage-highfi" },
     ],
   },
   {
-    screen: "Results Page",
+    screen: "Legacy: Results Page (superseded by Search Surface)",
     previews: [
       { label: "Low-Fidelity V1", href: "/design/results-lowfi" },
       { label: "Card Layout Exploration", href: "/design/results-card-variations" },
       { label: "High-Fidelity V1", href: "/design/results-highfi" },
     ],
-  },
-  {
-    screen: "Activity Detail",
-    previews: [],
-  },
-  {
-    screen: "Map View",
-    previews: [],
   },
 ];
 

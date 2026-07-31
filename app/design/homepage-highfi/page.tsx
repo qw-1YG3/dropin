@@ -23,24 +23,24 @@ const CHIPS = ["Badminton", "Swimming", "Pickleball", "Basketball", "Yoga", "Ope
 const HAPPENING_SOON = [
   {
     activity: "Lane Swim",
+    urgent: true,
     timing: "Starts in 20 min",
     centre: "Douglas Snow Aquatic Centre",
     distance: "2.1 km",
-    walkIn: true,
   },
   {
     activity: "Badminton",
+    urgent: false,
     timing: "Today, 7:00–9:00 PM",
     centre: "North York Community Centre",
     distance: "3.2 km",
-    walkIn: true,
   },
   {
     activity: "Yoga",
+    urgent: false,
     timing: "Tonight, 6:30 PM",
     centre: "Mitchell Field Community Centre",
     distance: "4.1 km",
-    walkIn: false,
   },
 ];
 
@@ -81,7 +81,7 @@ export default function HomepageHighFi() {
 
   return (
     <main className="min-h-screen bg-surface text-gray-900">
-      <PreviewHeader pageName="Homepage" stage="High-Fidelity" version="V1" />
+      <PreviewHeader pageName="Homepage" stage="High-Fidelity" version="V2" />
 
       <div className="mx-auto max-w-2xl px-4 sm:px-6">
         {/* 1. Header — quiet, does not compete with search */}
@@ -93,7 +93,10 @@ export default function HomepageHighFi() {
           </span>
         </header>
 
-        {/* 2 + 3. Headline + Search — Primary */}
+        {/* 2 + 3. Headline + Search — Primary. This is the reference search bar
+            every other search input (including Results) inherits shape and
+            behaviour from — larger scale and more padding, same radius,
+            same colour rules. */}
         <section className="pt-6 pb-6 sm:pt-9">
           <h1 className="mb-5 text-[1.75rem] font-semibold leading-tight tracking-tight text-gray-900 sm:text-4xl">
             What would you like to do today?
@@ -101,10 +104,10 @@ export default function HomepageHighFi() {
 
           <div className="relative">
             <label htmlFor="activity-search" className="sr-only">
-              Search activities
+              Search activities or locations
             </label>
             <div className="relative">
-              <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+              <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-500" />
               <input
                 id="activity-search"
                 type="text"
@@ -114,8 +117,8 @@ export default function HomepageHighFi() {
                   setSuggestionsOpen(true);
                 }}
                 onKeyDown={handleSearchKeyDown}
-                placeholder="Search activities"
-                className="w-full rounded-2xl border border-gray-200 bg-white py-4 pl-12 pr-4 text-base text-gray-900 shadow-sm outline-none transition-colors duration-150 placeholder:text-gray-400 hover:border-gray-300 focus:border-accent focus:ring-4 focus:ring-accent-soft"
+                placeholder="Search activities or locations"
+                className="w-full rounded-2xl border border-gray-200 bg-white py-4 pl-12 pr-4 text-base text-gray-900 shadow-sm outline-none transition-colors duration-150 placeholder:text-gray-500 hover:border-gray-300 focus:border-accent focus:ring-2 focus:ring-accent/40"
               />
             </div>
 
@@ -137,7 +140,10 @@ export default function HomepageHighFi() {
           </div>
         </section>
 
-        {/* 4 + 5. Activity chips + Discovery entry — Secondary */}
+        {/* 4 + 5. Activity chips + Discovery entry — Secondary.
+            Chips keep icons here (Homepage is the "which activity" recognition
+            moment); Results chips stay text-only (narrowing a known search) —
+            documented, intentional difference, not an inconsistency. */}
         <section className="pb-8">
           <div className="mb-4 flex flex-wrap gap-2">
             {CHIPS.map((chip) => {
@@ -149,10 +155,10 @@ export default function HomepageHighFi() {
                   type="button"
                   aria-pressed={active}
                   onClick={() => handleChipClick(chip)}
-                  className={`group inline-flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${
+                  className={`group inline-flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${
                     active
-                      ? "border-accent bg-accent text-white shadow-sm"
-                      : "border-gray-200 bg-white text-gray-700 hover:border-accent/40 hover:bg-accent-soft hover:text-accent"
+                      ? "border-accent bg-accent font-semibold text-white"
+                      : "border-gray-200 bg-white font-medium text-gray-700 hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
                   }`}
                 >
                   <Icon className={active ? "h-4 w-4 text-white" : "h-4 w-4 text-gray-400 transition-colors duration-150 group-hover:text-accent"} />
@@ -162,24 +168,34 @@ export default function HomepageHighFi() {
             })}
           </div>
 
+          {/* Discovery CTA — teal only on hover/focus now, no permanent tinted
+              fill at rest. A large resting-state colour surface is exactly what
+              the revised colour philosophy rules out; the pill shape + icon +
+              border keep it noticeable without needing a colour crutch. */}
           <button
             type="button"
             onClick={handleDiscoveryClick}
-            className="inline-flex items-center gap-2 rounded-full bg-accent-soft px-4 py-2 text-sm font-medium text-accent transition-colors duration-150 hover:bg-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+            className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors duration-150 hover:border-accent/50 hover:bg-accent-soft hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
           >
             <LocationIcon className="h-4 w-4" />
             Show me what&rsquo;s available nearby
           </button>
 
           {lastAction && (
-            <p className="mt-3 text-xs text-gray-400">
+            <p className="mt-3 text-xs text-gray-500">
               Preview only — would open Results for &ldquo;{lastAction}&rdquo;.
             </p>
           )}
         </section>
       </div>
 
-      {/* 6. Happening Soon preview strip — Tertiary, demonstrates Real-Time Confidence */}
+      {/* 6. Happening Soon preview strip — Tertiary, demonstrates Real-Time
+          Confidence. Card language now matches Results exactly: same name
+          size/weight, same urgency-conditional time treatment (dot + teal
+          only when genuinely imminent), same combined centre+distance line,
+          same padding, same hover (shadow only, no translate). Walk-in badge
+          removed — Results deliberately doesn't claim access-status certainty,
+          so neither should this preview. */}
       <section className="border-t border-gray-200/70 py-8">
         <div className="mx-auto max-w-2xl px-4 sm:px-6">
           <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-gray-500">
@@ -189,20 +205,22 @@ export default function HomepageHighFi() {
             {HAPPENING_SOON.map((item) => (
               <div
                 key={item.activity}
-                className="min-w-[240px] flex-shrink-0 snap-start rounded-2xl border border-gray-200 bg-white p-4 transition-shadow duration-200 motion-safe:hover:-translate-y-0.5 hover:shadow-md sm:min-w-0"
+                className="min-w-[240px] flex-shrink-0 snap-start rounded-2xl border border-gray-100 bg-white p-5 transition-shadow duration-200 hover:shadow-md sm:min-w-0"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-semibold text-gray-900">{item.activity}</p>
-                  {item.walkIn && (
-                    <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                      Walk-in
-                    </span>
+                <p className="text-[18px] font-bold leading-tight text-gray-900">{item.activity}</p>
+                <p
+                  className={`mt-1.5 flex items-center gap-1.5 text-sm ${
+                    item.urgent ? "font-semibold text-accent" : "font-medium text-gray-700"
+                  }`}
+                >
+                  {item.urgent && (
+                    <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent" aria-hidden="true" />
                   )}
-                </div>
-                <p className="mt-2 text-sm font-medium text-accent">{item.timing}</p>
-                <p className="mt-2 text-sm text-gray-600">{item.centre}</p>
-                <p className="mt-0.5 text-xs text-gray-400">{item.distance}</p>
+                  {item.timing}
+                </p>
+                <p className="mt-2 text-sm text-gray-500">
+                  {item.centre} · {item.distance}
+                </p>
               </div>
             ))}
           </div>
@@ -211,8 +229,8 @@ export default function HomepageHighFi() {
 
       {/* 7. Data transparency / footer — Tertiary */}
       <footer className="border-t border-gray-200/70 py-6 text-center">
-        <p className="text-xs text-gray-400">Data from Toronto Open Data &middot; Updated recently</p>
-        <p className="mt-2 text-xs text-gray-300">About &middot; Coverage &middot; Contact</p>
+        <p className="text-xs text-gray-500">Data from Toronto Open Data &middot; Updated recently</p>
+        <p className="mt-2 text-xs text-gray-500">About &middot; Coverage &middot; Contact</p>
       </footer>
     </main>
   );

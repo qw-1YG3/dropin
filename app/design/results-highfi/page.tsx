@@ -79,10 +79,11 @@ export default function ResultsHighFi() {
           <div>
             <p className="text-[18px] font-bold leading-tight text-gray-900">{s.activity}</p>
             <p
-              className={`mt-1.5 text-[15px] ${
+              className={`mt-1.5 flex items-center gap-1.5 text-sm ${
                 s.urgent ? "font-semibold text-accent" : "font-medium text-gray-700"
               }`}
             >
+              {s.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent" aria-hidden="true" />}
               {timeLabel(s)}
             </p>
             <p className="mt-2 text-sm text-gray-500">
@@ -92,7 +93,7 @@ export default function ResultsHighFi() {
 
           {/* Right — decision signal slot: minimally populated with Price for MVP,
               architecturally free to hold other lightweight signals later */}
-          <span className="flex-shrink-0 text-xs text-gray-500">{s.price}</span>
+          <span className="flex-shrink-0 text-sm text-gray-500">{s.price}</span>
         </div>
       </button>
     );
@@ -100,23 +101,24 @@ export default function ResultsHighFi() {
 
   return (
     <main className="min-h-screen bg-surface text-gray-900">
-      <PreviewHeader pageName="Results" stage="High-Fidelity" version="V1" />
+      <PreviewHeader pageName="Results" stage="High-Fidelity" version="V2" />
 
       <div className="mx-auto max-w-2xl px-4 sm:px-6">
-        {/* Search Bar — same shape language as Homepage, meaningfully quieter */}
+        {/* Search Bar — same shape language as Homepage, meaningfully quieter.
+            Teal appears only on focus, never as a resting-state border tint. */}
         <div className="py-5">
           <label htmlFor="results-search" className="sr-only">
-            Search activities
+            Search activities or locations
           </label>
           <div className="relative">
-            <SearchIcon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <SearchIcon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
             <input
               id="results-search"
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search activities"
-              className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-sm text-gray-700 shadow-sm outline-none transition-colors duration-150 placeholder:text-gray-400 hover:border-gray-300 focus:border-accent focus:ring-4 focus:ring-accent-soft"
+              placeholder="Search activities or locations"
+              className="w-full rounded-2xl border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-sm text-gray-700 shadow-sm outline-none transition-colors duration-150 placeholder:text-gray-500 hover:border-gray-300 focus:border-accent focus:ring-2 focus:ring-accent/40"
             />
           </div>
         </div>
@@ -124,7 +126,7 @@ export default function ResultsHighFi() {
         {/* Filter Bar — activity narrowing + Time Scope. No manual sort control:
             ranking is always the system's blended relevance score. */}
         <div className="pb-5">
-          <p className="mb-2 text-xs text-gray-500">{`Types of ${query || "this activity"}:`}</p>
+          <p className="mb-2 text-sm text-gray-600">{`${query || "Activity"} options`}</p>
           <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
             {ACTIVITY_FILTERS.map((f) => {
               const active = activeFilter === f;
@@ -134,10 +136,10 @@ export default function ResultsHighFi() {
                   type="button"
                   aria-pressed={active}
                   onClick={() => setActiveFilter(f)}
-                  className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${
+                  className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${
                     active
-                      ? "border-accent bg-accent text-white"
-                      : "border-gray-200 bg-white text-gray-600 hover:border-accent/40 hover:bg-accent-soft hover:text-accent"
+                      ? "border-accent bg-accent font-semibold text-white"
+                      : "border-gray-200 bg-white font-medium text-gray-600 hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
                   }`}
                 >
                   {f}
@@ -146,14 +148,14 @@ export default function ResultsHighFi() {
             })}
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs text-gray-500">
+          <div className="flex items-center gap-1.5 text-sm text-gray-500">
             <button
               type="button"
               onClick={() => setTimeWindow("today")}
               className={
                 timeWindow === "today"
                   ? "font-semibold text-accent underline underline-offset-2"
-                  : "hover:text-gray-700"
+                  : "hover:text-accent"
               }
             >
               Today
@@ -165,7 +167,7 @@ export default function ResultsHighFi() {
               className={
                 timeWindow === "week"
                   ? "font-semibold text-accent underline underline-offset-2"
-                  : "hover:text-gray-700"
+                  : "hover:text-accent"
               }
             >
               This Week
@@ -174,20 +176,20 @@ export default function ResultsHighFi() {
         </div>
 
         {/* Results Count + Last Updated */}
-        <div className="border-t border-gray-200/70 py-4 text-xs text-gray-400">
+        <div className="border-t border-gray-200/70 py-4 text-xs text-gray-500">
           {`${filtered.length} ${filtered.length === 1 ? "activity" : "activities"} · Last updated 3 hours ago`}
         </div>
 
         {/* Day Groups + Activity Cards */}
         <div className="space-y-8 pb-4">
           {filtered.length === 0 ? (
-            <p className="py-16 text-center text-sm text-gray-400">
+            <p className="py-16 text-center text-sm text-gray-500">
               No activities match this filter. Try a different activity or widen the time window.
             </p>
           ) : (
             days.map((d) => (
               <div key={d.key}>
-                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
                   {DAY_LABELS[d.key]}
                 </h2>
                 <div className="space-y-3">
@@ -201,7 +203,7 @@ export default function ResultsHighFi() {
         </div>
 
         {lastClicked && (
-          <p className="pb-6 text-xs text-gray-400">
+          <p className="pb-6 text-xs text-gray-500">
             Preview only — would open Activity Detail for &ldquo;{lastClicked}&rdquo;.
           </p>
         )}
