@@ -459,12 +459,6 @@ export default function SearchSurface() {
                 Share
               </button>
             </div>
-
-            {!selectedSession.phone && !selectedSession.officialUrl && (
-              <p className="mt-3 text-xs text-gray-400">
-                No phone number or official page on file for this session yet.
-              </p>
-            )}
           </>
         )}
       </Sheet>
