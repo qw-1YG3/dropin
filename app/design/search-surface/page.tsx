@@ -13,67 +13,31 @@ import {
   SearchIcon,
   ShareIcon,
 } from "../_components/icons";
-
-type Day = "today" | "tomorrow";
-
-type Session = {
-  id: number;
-  activity: string;
-  day: Day;
-  urgent: boolean;
-  absoluteTime: string;
-  centre: string;
-  distanceKm: number;
-  price: string;
-  phone?: string;
-  officialUrl?: string;
-};
-
-// Order already reflects a blended relevance ranking (soonest + closest +
-// context) — never a user-facing sort choice, per the Decision Principle.
-const SESSIONS: Session[] = [
-  { id: 1, activity: "Lane Swim", day: "today", urgent: true, absoluteTime: "7:00–8:00 PM", centre: "Douglas Snow Aquatic Centre", distanceKm: 2.1, price: "$6", phone: "416-555-0142", officialUrl: "https://toronto.ca/data/parks/prd/facilities/complex/60/index.html" },
-  { id: 2, activity: "Badminton", day: "today", urgent: true, absoluteTime: "6:45–8:00 PM", centre: "North York Community Centre", distanceKm: 3.2, price: "$8", phone: "416-555-0198", officialUrl: "https://toronto.ca/data/parks/prd/facilities/complex/167/index.html" },
-  { id: 3, activity: "Family Swim", day: "today", urgent: false, absoluteTime: "8:00–9:00 PM", centre: "Wallace Emerson Community Centre", distanceKm: 1.8, price: "$4" },
-  { id: 4, activity: "Yoga", day: "today", urgent: false, absoluteTime: "7:00–8:00 PM", centre: "Mitchell Field Community Centre", distanceKm: 4.1, price: "Free", officialUrl: "https://toronto.ca/data/parks/prd/facilities/complex/302/index.html" },
-  { id: 5, activity: "Leisure Swim", day: "today", urgent: true, absoluteTime: "7:15–8:15 PM", centre: "Regent Park Aquatic Centre", distanceKm: 3.4, price: "$6", phone: "416-555-0177" },
-  { id: 6, activity: "Lane Swim", day: "today", urgent: false, absoluteTime: "9:00–10:00 PM", centre: "North York Community Centre", distanceKm: 3.2, price: "$6", phone: "416-555-0198", officialUrl: "https://toronto.ca/data/parks/prd/facilities/complex/167/index.html" },
-  { id: 7, activity: "Women's Swim", day: "today", urgent: false, absoluteTime: "9:30–10:30 PM", centre: "Cecil Community Centre", distanceKm: 4.5, price: "Free", phone: "416-555-0163", officialUrl: "https://toronto.ca/data/parks/prd/facilities/complex/88/index.html" },
-  { id: 8, activity: "Basketball", day: "today", urgent: false, absoluteTime: "8:00–9:30 PM", centre: "Wallace Emerson Community Centre", distanceKm: 1.8, price: "$5", phone: "416-555-0111", officialUrl: "https://toronto.ca/data/parks/prd/facilities/complex/54/index.html" },
-  { id: 9, activity: "Pickleball", day: "today", urgent: false, absoluteTime: "9:00–10:00 PM", centre: "Regent Park Community Centre", distanceKm: 3.4, price: "$5" },
-  { id: 10, activity: "Open Gym", day: "today", urgent: false, absoluteTime: "6:00–9:00 PM", centre: "Douglas Snow Aquatic Centre", distanceKm: 2.1, price: "Free", phone: "416-555-0142", officialUrl: "https://toronto.ca/data/parks/prd/facilities/complex/60/index.html" },
-  { id: 11, activity: "Lane Swim", day: "tomorrow", urgent: false, absoluteTime: "6:00–7:00 AM", centre: "Douglas Snow Aquatic Centre", distanceKm: 2.1, price: "$6", phone: "416-555-0142", officialUrl: "https://toronto.ca/data/parks/prd/facilities/complex/60/index.html" },
-  { id: 12, activity: "Family Swim", day: "tomorrow", urgent: false, absoluteTime: "9:00–10:00 AM", centre: "Wallace Emerson Community Centre", distanceKm: 1.8, price: "$4", phone: "416-555-0111" },
-  { id: 13, activity: "Leisure Swim", day: "tomorrow", urgent: false, absoluteTime: "10:00–11:00 AM", centre: "Mitchell Field Community Centre", distanceKm: 4.1, price: "$6" },
-];
-
-const SHORTCUTS = ["Badminton", "Swimming", "Pickleball", "Basketball", "Yoga", "Open Gym"];
-
-const QUERY_GROUPS: Record<string, string[]> = {
-  swimming: ["Lane Swim", "Leisure Swim", "Family Swim", "Women's Swim"],
-  swim: ["Lane Swim", "Leisure Swim", "Family Swim", "Women's Swim"],
-  badminton: ["Badminton"],
-  pickleball: ["Pickleball"],
-  basketball: ["Basketball"],
-  yoga: ["Yoga"],
-  "open gym": ["Open Gym"],
-};
+import { ACTIVITY_GROUPS, SHORTCUTS } from "@/lib/dropin/activities";
+import type { Day, Session } from "@/lib/dropin/types";
 
 const SUGGESTION_POOL = ["Badminton", "Pickleball", "Basketball", "Swimming", "Lane Swim", "Leisure Swim", "Yoga", "Open Gym"];
 
 const DAY_LABELS: Record<Day, string> = { today: "Today", tomorrow: "Tomorrow" };
 
-function resolveActivities(query: string): string[] {
+function resolveActivities(query: string, sessions: Session[]): string[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
-  if (QUERY_GROUPS[q]) return QUERY_GROUPS[q];
-  const match = SESSIONS.find((s) => s.activity.toLowerCase().includes(q));
+  if (ACTIVITY_GROUPS[q]) return ACTIVITY_GROUPS[q];
+  const match = sessions.find((s) => s.activity.toLowerCase().includes(q));
   return match ? [match.activity] : [];
 }
 
 function timeLabel(s: Session) {
   const prefix = s.day === "today" ? (s.urgent ? "Happening soon" : "Today") : "Tomorrow";
   return `${prefix} · ${s.absoluteTime}`;
+}
+
+// Share always renders; Website/Call are conditional on real data. The grid
+// must match however many actually render — a hardcoded column count leaves
+// a visible empty gap whenever a session is missing phone or officialUrl.
+function secondaryActionCount(s: Session) {
+  return 1 + (s.officialUrl ? 1 : 0) + (s.phone ? 1 : 0);
 }
 
 function SessionCard({ s, onSelect }: { s: Session; onSelect: (s: Session) => void }) {
@@ -87,18 +51,19 @@ function SessionCard({ s, onSelect }: { s: Session; onSelect: (s: Session) => vo
         <div>
           <p className="text-[18px] font-bold leading-tight text-gray-900">{s.activity}</p>
           <p
-            className={`mt-1.5 flex items-center gap-1.5 text-sm ${
+            className={`mt-1 flex items-center gap-1.5 text-sm ${
               s.urgent ? "font-semibold text-accent" : "font-medium text-gray-700"
             }`}
           >
             {s.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent" aria-hidden="true" />}
             {timeLabel(s)}
           </p>
-          <p className="mt-2 text-sm text-gray-500">
-            {s.centre} · {s.distanceKm} km
+          <p className="mt-3 text-sm text-gray-500">
+            {s.centre}
+            {s.distanceKm !== undefined && ` · ${s.distanceKm} km`}
           </p>
         </div>
-        <span className="flex-shrink-0 text-sm text-gray-500">{s.price}</span>
+        {s.price && <span className="flex-shrink-0 text-sm text-gray-500">{s.price}</span>}
       </div>
     </button>
   );
@@ -127,14 +92,27 @@ export default function SearchSurface() {
   const [discoveryFreeOnly, setDiscoveryFreeOnly] = useState(false);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [infoSheetOpen, setInfoSheetOpen] = useState(false);
+  const [feedbackStage, setFeedbackStage] = useState<"idle" | "writing" | "sent">("idle");
+  const [feedbackText, setFeedbackText] = useState("");
   const [loading, setLoading] = useState(true);
   const [locationLabel, setLocationLabel] = useState("Near you");
   const [editingLocation, setEditingLocation] = useState(false);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const directionsRef = useRef<HTMLAnchorElement>(null);
 
   useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 600);
-    return () => clearTimeout(t);
+    let cancelled = false;
+    fetch("/api/sessions")
+      .then((res) => res.json())
+      .then((data: { sessions: Session[] }) => {
+        if (cancelled) return;
+        setSessions(data.sessions);
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const suggestions = useMemo(() => {
@@ -144,21 +122,24 @@ export default function SearchSurface() {
   }, [query, suggestionsOpen]);
 
   const discoveryHighlights = useMemo(() => {
-    const todayPool = SESSIONS.filter((s) => s.day === "today");
+    const todayPool = sessions.filter((s) => s.day === "today");
     if (discoveryFreeOnly) return todayPool.filter((s) => s.price === "Free");
-    return todayPool.slice(0, 4);
-  }, [discoveryFreeOnly]);
+    // Urgent (happening-soon) sessions always surface first in the top-4 —
+    // relevance the user can act on immediately shouldn't lose to array order.
+    const ranked = [...todayPool].sort((a, b) => Number(b.urgent) - Number(a.urgent));
+    return ranked.slice(0, 4);
+  }, [sessions, discoveryFreeOnly]);
 
-  const matchedActivities = useMemo(() => resolveActivities(committedQuery), [committedQuery]);
+  const matchedActivities = useMemo(() => resolveActivities(committedQuery, sessions), [committedQuery, sessions]);
 
   const resultsFiltered = useMemo(() => {
-    return SESSIONS.filter((s) => {
+    return sessions.filter((s) => {
       if (!matchedActivities.includes(s.activity)) return false;
       if (timeWindow === "today" && s.day === "tomorrow") return false;
       if (activeFilter !== "All" && s.activity !== activeFilter) return false;
       return true;
     });
-  }, [matchedActivities, activeFilter, timeWindow]);
+  }, [sessions, matchedActivities, activeFilter, timeWindow]);
 
   const resultsByDay = useMemo(() => {
     const order: Day[] = timeWindow === "week" ? ["today", "tomorrow"] : ["today"];
@@ -302,6 +283,7 @@ export default function SearchSurface() {
                   </button>
                 );
               })}
+              <span className="my-1 w-px flex-shrink-0 self-stretch bg-gray-200" aria-hidden="true" />
               <button
                 type="button"
                 aria-pressed={discoveryFreeOnly}
@@ -414,31 +396,46 @@ export default function SearchSurface() {
         )}
       </div>
 
-      {/* ===================== QUICK ACTION SHEET ===================== */}
-      <Sheet open={!!selectedSession} onClose={() => setSelectedSession(null)} titleId="quick-action-title">
+      {/* ===================== QUICK ACTION SHEET =====================
+          Recap is deliberately minimal: Activity + Centre only. Time is
+          dropped entirely — it's fully visible on the card beneath and has
+          no bearing on any action here. Centre stays, but as context for
+          the actions (which are literally about that place), not as a
+          repeat of browsing information. */}
+      <Sheet
+        open={!!selectedSession}
+        onClose={() => setSelectedSession(null)}
+        titleId="quick-action-title"
+        desktopVariant="modal"
+        initialFocusRef={directionsRef}
+      >
         {selectedSession && (
           <>
-            <p id="quick-action-title" className="text-[18px] font-bold text-gray-900">
+            <p id="quick-action-title" className="text-[18px] font-bold leading-tight text-gray-900">
               {selectedSession.activity}
             </p>
-            <p className="mt-1 text-sm text-gray-600">{timeLabel(selectedSession)}</p>
-            <p className="mt-1 text-sm text-gray-500">{selectedSession.centre}</p>
+            <p className="mt-0.5 text-sm text-gray-500">{selectedSession.centre}</p>
 
             <a
+              ref={directionsRef}
               href="#"
               onClick={(e) => e.preventDefault()}
-              className="mt-4 flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+              className="mt-5 flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
             >
               <DirectionsIcon className="h-4 w-4" />
               Directions
             </a>
 
-            <div className="mt-2 grid grid-cols-3 gap-2">
+            <div
+              className={`mt-2 grid gap-2 ${
+                { 1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3" }[secondaryActionCount(selectedSession)]
+              }`}
+            >
               {selectedSession.officialUrl && (
                 <a
                   href="#"
                   onClick={(e) => e.preventDefault()}
-                  className="flex flex-col items-center gap-1 rounded-xl border border-gray-200 py-2.5 text-xs font-medium text-gray-700 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
+                  className="flex flex-col items-center gap-1 rounded-xl border border-gray-200 py-3 text-xs font-medium text-gray-700 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                 >
                   <LinkIcon className="h-4 w-4" />
                   Website
@@ -448,7 +445,7 @@ export default function SearchSurface() {
                 <a
                   href="#"
                   onClick={(e) => e.preventDefault()}
-                  className="flex flex-col items-center gap-1 rounded-xl border border-gray-200 py-2.5 text-xs font-medium text-gray-700 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
+                  className="flex flex-col items-center gap-1 rounded-xl border border-gray-200 py-3 text-xs font-medium text-gray-700 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                 >
                   <PhoneIcon className="h-4 w-4" />
                   Call
@@ -456,7 +453,7 @@ export default function SearchSurface() {
               )}
               <button
                 type="button"
-                className="flex flex-col items-center gap-1 rounded-xl border border-gray-200 py-2.5 text-xs font-medium text-gray-700 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
+                className="flex flex-col items-center gap-1 rounded-xl border border-accent py-3 text-xs font-medium text-gray-700 transition-colors hover:bg-accent-soft hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
               >
                 <ShareIcon className="h-4 w-4" />
                 Share
@@ -478,7 +475,11 @@ export default function SearchSurface() {
           dialog's own position/shape changes. */}
       <Sheet
         open={infoSheetOpen}
-        onClose={() => setInfoSheetOpen(false)}
+        onClose={() => {
+          setInfoSheetOpen(false);
+          setFeedbackStage("idle");
+          setFeedbackText("");
+        }}
         titleId="info-sheet-title"
         desktopVariant="modal"
       >
@@ -490,20 +491,20 @@ export default function SearchSurface() {
           drop-in activities from official recreation providers — all in one place.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-gray-500">Why DropIn</h3>
+        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-accent">Why DropIn</h3>
         <p className="mt-1 text-sm text-gray-600">
           Community recreation is one of the easiest ways to stay active — but finding what&rsquo;s
           actually on today usually means checking several different websites. DropIn brings it into
           one search.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-gray-500">Our Data</h3>
+        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-accent">Our Data</h3>
         <p className="mt-1 text-sm text-gray-600">
           Schedules come directly from official recreation providers. Whenever possible, DropIn links
           straight to the official source to help keep information accurate.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-gray-500">What You&rsquo;ll Find</h3>
+        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-accent">What You&rsquo;ll Find</h3>
         <ul className="mt-1 list-disc space-y-0.5 pl-4 text-sm text-gray-600">
           <li>Nearby activities, ranked by what&rsquo;s happening soonest</li>
           <li>Official schedules, not estimates</li>
@@ -511,13 +512,62 @@ export default function SearchSurface() {
           <li>Quick directions to get you there</li>
         </ul>
 
-        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-gray-500">Feedback</h3>
-        <p className="mt-1 text-sm text-gray-600">
-          Found something incorrect? Have an idea?{" "}
-          <a href="#" onClick={(e) => e.preventDefault()} className="text-accent underline underline-offset-2">
-            We&rsquo;d love to hear from you.
-          </a>
-        </p>
+        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-accent">Feedback</h3>
+        {feedbackStage === "idle" && (
+          <p className="mt-1 text-sm text-gray-600">
+            Found something that doesn&rsquo;t look right?{" "}
+            <button
+              type="button"
+              onClick={() => setFeedbackStage("writing")}
+              className="text-accent underline underline-offset-2"
+            >
+              Let us know.
+            </button>
+          </p>
+        )}
+
+        {feedbackStage === "writing" && (
+          <div className="mt-1.5">
+            <label htmlFor="feedback-text" className="sr-only">
+              Your note to DropIn
+            </label>
+            <textarea
+              id="feedback-text"
+              autoFocus
+              rows={3}
+              value={feedbackText}
+              onChange={(e) => setFeedbackText(e.target.value)}
+              placeholder="What looks wrong? A time, price, or address that's off..."
+              className="w-full resize-none rounded-lg border border-gray-200 p-2.5 text-sm text-gray-700 outline-none transition-colors placeholder:text-gray-400 focus:border-accent focus:ring-2 focus:ring-accent/40"
+            />
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setFeedbackStage("idle");
+                  setFeedbackText("");
+                }}
+                className="rounded-lg px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={feedbackText.trim().length === 0}
+                onClick={() => setFeedbackStage("sent")}
+                className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        )}
+
+        {feedbackStage === "sent" && (
+          <p className="mt-1 rounded-lg border border-accent/25 bg-accent-soft px-3 py-2 text-sm text-accent">
+            Thanks — we&rsquo;ve received your note and will take a look.
+          </p>
+        )}
 
         <p className="mt-5 text-xs text-gray-400">DropIn · Design Preview · v0.1</p>
       </Sheet>

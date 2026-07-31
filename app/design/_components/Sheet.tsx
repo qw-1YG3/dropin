@@ -15,19 +15,27 @@ type SheetProps = {
    * only the sheet's own position/shape changes.
    */
   desktopVariant?: "sheet" | "modal";
+  /**
+   * Element to focus when the sheet opens, instead of the Close button.
+   * Use for sheets with one clear primary action (e.g. Directions) so
+   * keyboard/screen-reader users land on it immediately rather than on Close.
+   * Defaults to focusing Close, which remains correct for purely
+   * informational sheets with no single primary action.
+   */
+  initialFocusRef?: React.RefObject<HTMLElement | null>;
 };
 
 // One overlay mechanism shared by the Quick Action Sheet and the Product
 // Information Sheet — same motion family, same scrim, same accessibility
 // contract, different content payload and (optionally) different desktop
 // placement.
-export function Sheet({ open, onClose, titleId, children, desktopVariant = "sheet" }: SheetProps) {
+export function Sheet({ open, onClose, titleId, children, desktopVariant = "sheet", initialFocusRef }: SheetProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const isModal = desktopVariant === "modal";
 
   useEffect(() => {
     if (!open) return;
-    closeButtonRef.current?.focus();
+    (initialFocusRef?.current ?? closeButtonRef.current)?.focus();
 
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();

@@ -40,13 +40,12 @@ Geist Sans throughout (already in the project — a second typeface would itself
 
 | Role | Size | Weight | Where |
 |---|---|---|---|
-| Page headline | 28–30px | Bold | Homepage only |
 | Card primary (Activity Name) | 18px | Bold | Every card, everywhere |
 | Card secondary (Time) | 15px | Semibold/Medium | Every card |
 | Supporting text (Centre, Distance) | 14px | Regular | Every card |
 | Micro/meta (Price, section labels, trust line) | 12–13px | Regular, muted | Everywhere |
 
-Four steps, deliberately not more — enough for real hierarchy, not so many the scale itself becomes noise.
+Three steps, deliberately not more — enough for real hierarchy, not so many the scale itself becomes noise. (The scale previously included a "Page headline" row for a rhetorical question above the search bar — that headline was removed when Discovery State was built, since real results are already visible and nothing needs to ask "what do you want" first. See `docs/INFORMATION_ARCHITECTURE.md`'s Search: The Product, Not a Feature section.)
 
 ## Spacing
 
@@ -75,10 +74,12 @@ Colour reinforces hierarchy — it never replaces it. The interface relies prima
 
 ## Search Language
 
-One shape language, two scales — this is what "Search is a shared capability, not two features" should look like visually:
+One shape language, two scales — this is what "Search is the product, not a page-specific feature" should look like visually:
 
-- **Homepage:** large, generously rounded, soft shadow, accent-coloured focus ring — the hero element.
-- **Results:** identical shape language, meaningfully smaller and quieter (thinner border, less padding) — the same trusted control, just not the loudest thing on the page anymore.
+- **Discovery State:** large, generously rounded, soft shadow, accent-coloured focus ring — the hero element.
+- **Results State:** identical shape language, meaningfully smaller and quieter (thinner border, less padding) — the same trusted control, just not the loudest thing on the surface anymore.
+
+Searching State doesn't get its own scale — it's Discovery State's large search bar with a suggestions dropdown layered on top, not a third visual treatment.
 
 ## Motion Principles
 
@@ -86,7 +87,7 @@ Governing rule: **motion only ever confirms something the user just did — it n
 
 ## Icon Philosophy
 
-Icons aid recognition at a decision point — never decoration. They belong where a user is choosing what to search for (Homepage quick-start chips), not where a user is comparing sessions they've already found (Results cards) — by the time an activity is named in bold on a card, an icon repeating that fact is redundant, not helpful. One custom stroke-based icon set throughout (consistent weight, rounded caps, single colour) — no icon library, no mixed styles.
+Icons aid recognition at a decision point — never decoration. They belong where a user is choosing what to search for (Discovery State's quick-start chips), not where a user is comparing sessions they've already found (Results State cards) — by the time an activity is named in bold on a card, an icon repeating that fact is redundant, not helpful. One custom stroke-based icon set throughout (consistent weight, rounded caps, single colour) — no icon library, no mixed styles.
 
 ## Component Behaviour
 
@@ -115,3 +116,4 @@ Patterns that should never become part of DropIn, and why:
 ## Revision Notes
 
 - 2026-07-30 — Initial version, formalizing the visual direction proposal discussed prior to Results Page High-Fidelity. Carries forward and codifies choices already made in Homepage High-Fidelity (teal accent, neutral surface background, Geist Sans, custom icon set) rather than introducing new ones, since a visual language that forks per page isn't a language.
+- 2026-07-31 — Documentation Sync Sprint: this document predated the Search Surface rewrite and still referred to "Homepage" and "Results" as pages throughout (Typography, Search Language, Icon Philosophy). Updated to Discovery State / Searching State / Results State. Also removed the Typography scale's "Page headline" row — that headline no longer exists in the built product (Discovery State intentionally has none), so keeping the row, even renamed, would have described a fictional element. Historical references to "Homepage High-Fidelity" as a named build stage (Colour Philosophy provenance, earlier Revision Notes) were left as-is — those are accurate historical record, not current architecture claims.

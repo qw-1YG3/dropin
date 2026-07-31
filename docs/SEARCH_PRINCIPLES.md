@@ -13,7 +13,7 @@ Search is DropIn's primary entry point into the product, not just an input field
 
 Clearly distinct, and never treated as interchangeable:
 
-- **Homepage Quick-start Chips** — static shortcuts to popular activities. Purpose: help users start searching quickly. Not filters, and not suggestions.
+- **Discovery State Quick-start Chips** — static shortcuts to popular activities. Purpose: help users start searching quickly. Not filters, and not suggestions.
 - **Typing Suggestions** — temporary autocomplete suggestions shown while typing, drawn from canonical activity names only (never raw source strings). Help users complete a query. Disappear after a selection or search. Not filters.
 - **Results Filter Chips** — context-aware filters generated from the resolved search result, used to refine the current result set. Example: Swimming → Lane Swim / Leisure Swim / Family Swim. Badminton → Adult / Family / Open Play.
 
@@ -23,15 +23,18 @@ For MVP, users can search by:
 
 - Activity
 - Community Centre
-- City
 - Postal Code
+- Neighbourhood
+- City
 
 Matching intelligence differs by type:
 
 - **Activity search** supports prefix matching, typo tolerance, synonyms, and intelligent ranking.
-- **Location-based search** (Community Centre, City, Postal Code) only requires standard/exact matching for MVP — advanced fuzzy matching and ranking for this category can come later.
+- **Location-based search** (Community Centre, Neighbourhood, City, Postal Code) only requires standard/exact matching for MVP — advanced fuzzy matching and ranking for this category can come later.
 
-Regardless of query type, the result is always an activity-first, relevance-ranked list of individual sessions — never a directory or browse view of a place. A city or postal code query recentres the location context and runs the same relevance-ranked search from there; a specific, uniquely-identified community centre name may scope results to that one place, but is still presented as a ranked list of sessions, not a directory page. This is what keeps Universal Search from becoming Universal Browse — the input gets broader, the output shape never changes.
+Regardless of query type, the result is always an activity-first, relevance-ranked list of individual sessions — never a directory or browse view of a place. This is what keeps Universal Search from becoming Universal Browse — the input gets broader, the output shape never changes.
+
+How a query is actually parsed into these intents — detection priority, mixed queries like "Swimming Scarborough," and how a detected location interacts with the persistent location context — is specified in `docs/SEARCH_ENGINE.md`, the canonical source for that behavior. Not duplicated here.
 
 ## Progressive Intelligence
 
@@ -40,8 +43,8 @@ What belongs in MVP versus what's intentionally deferred:
 | MVP | Future |
 |---|---|
 | Activity: prefix, typo-tolerant, synonym matching + relevance ranking | Natural language queries (e.g. "badminton tonight under $5") |
-| Location/Centre/Postal Code: standard/exact matching | Advanced fuzzy matching and ranking for location-type queries |
-| Live typing suggestions, canonical names only, capped list | Personalized or popularity-ranked Homepage quick-start chips |
+| Location/Centre/Neighbourhood/Postal Code: standard/exact matching | Advanced fuzzy matching and ranking for location-type queries |
+| Live typing suggestions, canonical names only, capped list | Personalized or popularity-ranked Discovery State quick-start chips |
 | Dynamic Results Filter Chips (Group/Category-derived) | Multilingual query parsing (term data model already supports locale aliases; parsing behaviour does not exist yet) |
 | Graceful no-match → nearest match or Discovery Intent fallback | Voice search |
 | Single blended relevance ranking, no manual sort | A dedicated centre-browse mode, if ever justified by real user need |
@@ -50,7 +53,7 @@ What belongs in MVP versus what's intentionally deferred:
 
 **Recommended:** `Search activities or locations`
 
-Finalized during the Design Consistency Sprint as shorter than the originally proposed `Search activities, centres or postal codes` — still communicates breadth (activity vs. location), without listing every location sub-type. Used identically on Homepage and Results, since Search is one shared capability, not two.
+Finalized during the Design Consistency Sprint as shorter than the originally proposed `Search activities, centres or postal codes` — still communicates breadth (activity vs. location), without listing every location sub-type. Used identically in Discovery State and Results State, since Search is one shared capability, not two.
 
 ## Decision Principle
 
@@ -60,10 +63,11 @@ Our goal is not to build the most configurable search. Our goal is to build the 
 
 This is the reason there is no manual sort control, no "did you mean X? yes/no" confirmation step for auto-resolved typos, and no separate query mode for locations versus activities — every one of those would be asking the user to make a decision the system can make for them.
 
-Note: Today/This Week on the Results page is a deliberate exception in appearance only, not in substance — see "Scope Controls vs. Ranking Decisions" in `docs/INFORMATION_ARCHITECTURE.md` for why it doesn't conflict with this principle.
+Note: Today/This Week in Results State is a deliberate exception in appearance only, not in substance — see "Scope Controls vs. Ranking Decisions" in `docs/INFORMATION_ARCHITECTURE.md` for why it doesn't conflict with this principle.
 
 ---
 
 ## Revision Notes
 
 - 2026-07-30 — Restructured around the finalized six-section format (Search Philosophy, Three Interaction Patterns, Universal Search, Progressive Intelligence, Placeholder, Decision Principle), consolidating content previously spread across separate Forgiving Search / Ranking / Synonyms / Empty States / Future Enhancements headings — no content was dropped, it was folded into the new structure. The "results are always an activity-first ranked list, never a directory/browse view" principle (flagged for confirmation last round) is now treated as agreed, since it wasn't contradicted and is restated here under Universal Search.
+- 2026-07-31 — Documentation Sync Sprint: added Neighbourhood as a fifth Universal Search intent, matching `docs/SEARCH_ENGINE.md` (this document previously listed only four and was out of sync). Removed the detailed location-context recentering description from Universal Search — that behavior is now specified precisely in `docs/SEARCH_ENGINE.md` (override vs. persistent), and restating a coarser version here risked the two documents drifting apart again; this document now points there instead of duplicating. Also fixed several remaining "Homepage"/"Results page" references left over from the pre-Search-Surface architecture (Three Interaction Patterns, Progressive Intelligence, Placeholder, Decision Principle) to Discovery State/Results State.

@@ -30,13 +30,14 @@ Search is responsible for, in every state: being the primary entry point into th
 
 ## Location Context
 
-Unchanged from the prior version — still a single shared value, not a per-state or per-page copy.
-
-DropIn maintains **one shared location context** used across the entire Search Surface. Examples of what it can hold: `Near Me` (default, inferred silently via geolocation), a named place (`North York`), or a postal code (`M2N`).
+DropIn maintains **one shared, persistent location context** used across the entire Search Surface — not a per-state or per-page copy. Examples of what it can hold: `Near Me` (default, inferred silently via geolocation), a named place (`North York`), or a postal code (`M2N`).
 
 - **Set initially** via silent inference, shown as an editable ambient pill (`📍 Near you`) — never asked as an upfront question.
-- **Can also be changed** via Universal Search — typing a city or postal code updates this same shared context, regardless of which state the surface is currently in.
-- **Read identically by Discovery, Results, and the Quick Action Sheet** (e.g. for computing directions). One source of truth — no state maintains its own copy.
+- **A search that is purely a location** (typing just a neighbourhood, city, or postal code with no activity) updates this persistent context directly — the user is explicitly telling search where they are.
+- **A location detected as part of a mixed query** ("Swimming Scarborough") does *not* update the persistent context — it's a temporary override scoped to that one search. The persistent context is restored automatically as soon as the query is cleared or a new search without a location term is run.
+- **Read identically by Discovery State, Results State, and the Quick Action Sheet** (e.g. for computing directions) — always the *effective* location for the current search (override if one is active, otherwise the persistent context). One source of truth, no state maintains its own copy.
+
+Full mechanics — intent detection, how mixed queries are parsed, and exactly when an override applies versus updates the persistent value — are specified in `docs/SEARCH_ENGINE.md`, the canonical source for this behavior. This section states the outcome; that document states the rule.
 
 ## Scope Controls vs. Ranking Decisions
 
@@ -135,3 +136,4 @@ None of these require reintroducing a page. That's the actual test of whether th
 - 2026-07-30 — Initial version of this document.
 - 2026-07-30 — Removed Search as a step in Product Structure, gave it its own "Search: A Shared Capability" section. Added Location Context and "Scope Controls vs. Ranking Decisions."
 - 2026-07-30 — **Major rewrite.** Retired the three-page architecture (Homepage → Results → Detail) entirely, following the Product Architecture Review. Replaced with one persistent Search Surface with three states (Discovery, Searching, Results) and two overlay sheets (Quick Action Sheet, Product Information Sheet). Detail as a full page is gone — replaced by the Quick Action Sheet. Homepage and Results are no longer separate pages — Discovery state and Results state are two states of the same surface, which also resolves a redundancy the old architecture had: Homepage's "Happening Soon" preview and the Results list were the same kind of content, built twice. Location Context and Scope Controls reasoning carried forward unchanged, since both were already page-agnostic in substance.
+- 2026-07-31 — Documentation Sync Sprint: rewrote Location Context to state the finalized three-part behavior (persistent default, temporary search-location override, restoration on clear) and to point to `docs/SEARCH_ENGINE.md` as the canonical source for the underlying mechanics, rather than restating a coarser version of the same rule that could drift out of sync with it.
