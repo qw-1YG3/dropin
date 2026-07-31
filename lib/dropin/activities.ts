@@ -35,3 +35,24 @@ export const SHORTCUTS = ["Badminton", "Swimming", "Pickleball", "Basketball", "
 // now. Used to filter the raw dataset down to what DropIn's taxonomy
 // actually recognizes.
 export const SUPPORTED_COURSE_TITLES = Array.from(new Set(Object.values(ACTIVITY_GROUPS).flat()));
+
+// Maps a real Course Title to the canonical shortcut label used as the key
+// into ACTIVITY_ICONS, so any real session (e.g. "Leisure Swim (Women)")
+// resolves to the same icon as its shortcut chip (e.g. "Swimming").
+const COURSE_TITLE_TO_SHORTCUT: Record<string, string> = {
+  Badminton: "Badminton",
+  Basketball: "Basketball",
+  Pickleball: "Pickleball",
+  Yoga: "Yoga",
+  "Open Gym": "Open Gym",
+  "Lane Swim": "Swimming",
+  "Leisure Swim": "Swimming",
+  "Leisure Swim: Family": "Swimming",
+  "Lane Swim: Family": "Swimming",
+  "Leisure Swim (Women)": "Swimming",
+  "Lane Swim (Women)": "Swimming",
+};
+
+export function getShortcutForActivity(activity: string): string | undefined {
+  return COURSE_TITLE_TO_SHORTCUT[activity];
+}

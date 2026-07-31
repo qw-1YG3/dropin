@@ -13,7 +13,7 @@ import {
   SearchIcon,
   ShareIcon,
 } from "../_components/icons";
-import { ACTIVITY_GROUPS, SHORTCUTS } from "@/lib/dropin/activities";
+import { ACTIVITY_GROUPS, getShortcutForActivity, SHORTCUTS } from "@/lib/dropin/activities";
 import type { Day, Session } from "@/lib/dropin/types";
 
 const SUGGESTION_POOL = ["Badminton", "Pickleball", "Basketball", "Swimming", "Lane Swim", "Leisure Swim", "Yoga", "Open Gym"];
@@ -411,52 +411,68 @@ export default function SearchSurface() {
       >
         {selectedSession && (
           <>
-            <p id="quick-action-title" className="text-[18px] font-bold leading-tight text-gray-900">
-              {selectedSession.activity}
-            </p>
+            {(() => {
+              const ActivityIcon = ACTIVITY_ICONS[getShortcutForActivity(selectedSession.activity) ?? ""];
+              return (
+                <p id="quick-action-title" className="flex items-center gap-2 text-[18px] font-bold leading-tight text-gray-900">
+                  {ActivityIcon && <ActivityIcon className="h-5 w-5 text-gray-400" />}
+                  {selectedSession.activity}
+                </p>
+              );
+            })()}
             <p className="mt-0.5 text-sm text-gray-500">{selectedSession.centre}</p>
 
-            <a
-              ref={directionsRef}
-              href="#"
-              onClick={(e) => e.preventDefault()}
-              className="mt-5 flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-            >
-              <DirectionsIcon className="h-4 w-4" />
-              Directions
-            </a>
+            <div className="mt-5 flex justify-center">
+              <a
+                ref={directionsRef}
+                href="#"
+                onClick={(e) => e.preventDefault()}
+                className="grid w-1/2 min-w-[168px] grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+              >
+                <DirectionsIcon className="h-5 w-5" />
+                <span className="text-center">Directions</span>
+                <span aria-hidden="true" />
+              </a>
+            </div>
 
             <div
-              className={`mt-2 grid gap-2 ${
-                { 1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3" }[secondaryActionCount(selectedSession)]
-              }`}
+              className={
+                secondaryActionCount(selectedSession) === 1
+                  ? "mt-2 flex justify-center"
+                  : `mt-2 grid gap-2 ${{ 2: "grid-cols-2", 3: "grid-cols-3" }[secondaryActionCount(selectedSession)]}`
+              }
             >
               {selectedSession.officialUrl && (
                 <a
                   href="#"
                   onClick={(e) => e.preventDefault()}
-                  className="flex flex-col items-center gap-1 rounded-xl border border-gray-200 py-3 text-xs font-medium text-gray-700 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                  className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                 >
-                  <LinkIcon className="h-4 w-4" />
-                  Website
+                  <LinkIcon className="h-5 w-5" />
+                  <span className="text-center">Website</span>
+                  <span aria-hidden="true" />
                 </a>
               )}
               {selectedSession.phone && (
                 <a
                   href="#"
                   onClick={(e) => e.preventDefault()}
-                  className="flex flex-col items-center gap-1 rounded-xl border border-gray-200 py-3 text-xs font-medium text-gray-700 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                  className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                 >
-                  <PhoneIcon className="h-4 w-4" />
-                  Call
+                  <PhoneIcon className="h-5 w-5" />
+                  <span className="text-center">Call</span>
+                  <span aria-hidden="true" />
                 </a>
               )}
               <button
                 type="button"
-                className="flex flex-col items-center gap-1 rounded-xl border border-accent py-3 text-xs font-medium text-gray-700 transition-colors hover:bg-accent-soft hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                className={`grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-accent px-4 py-3 text-sm font-semibold text-accent transition-colors hover:bg-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${
+                  secondaryActionCount(selectedSession) === 1 ? "w-1/2 min-w-[168px]" : ""
+                }`}
               >
-                <ShareIcon className="h-4 w-4" />
-                Share
+                <ShareIcon className="h-5 w-5" />
+                <span className="text-center">Share</span>
+                <span aria-hidden="true" />
               </button>
             </div>
           </>

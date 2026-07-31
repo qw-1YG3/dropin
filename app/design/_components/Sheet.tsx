@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { CloseIcon } from "./icons";
 
 type SheetProps = {
   open: boolean;
@@ -70,9 +71,10 @@ export function Sheet({ open, onClose, titleId, children, desktopVariant = "shee
             ref={closeButtonRef}
             type="button"
             onClick={onClose}
-            className="ml-auto rounded-full p-1 text-sm text-gray-500 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            aria-label="Close"
+            className="ml-auto rounded-full p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
-            Close
+            <CloseIcon className="h-4 w-4" />
           </button>
         </div>
         {children}
