@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { PreviewHeader } from "../_components/PreviewHeader";
-import { SearchIcon } from "../_components/icons";
+import { SearchIcon } from "../../_components/icons";
 
 type Day = "today" | "tomorrow";
 

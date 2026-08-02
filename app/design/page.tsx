@@ -12,10 +12,6 @@ type ScreenGroup = {
 
 const DESIGN_PREVIEWS: ScreenGroup[] = [
   {
-    screen: "Search Surface",
-    previews: [{ label: "High-Fidelity V1", href: "/design/search-surface" }],
-  },
-  {
     screen: "Map View",
     previews: [],
   },
@@ -42,7 +38,12 @@ export default function DesignIndex() {
       <div className="mx-auto max-w-2xl">
         <h1 className="mb-1 text-xl font-semibold tracking-tight">Design Preview Hub</h1>
         <p className="mb-8 text-sm text-gray-500">
-          Temporary review environments, grouped by product screen. Not production routes.
+          Temporary review environments, grouped by product screen. Not production routes. Search
+          Surface graduated from here to production — see{" "}
+          <Link href="/" className="text-accent underline underline-offset-2">
+            the live app
+          </Link>
+          .
         </p>
 
         <div className="space-y-6">

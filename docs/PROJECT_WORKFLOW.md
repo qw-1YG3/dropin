@@ -12,6 +12,7 @@ This document is the long-term collaboration guide for DropIn's development.
 - Keep the MVP intentionally simple.
 - Prioritize product behaviour before technical implementation.
 - Every design decision should support our core product principles.
+- As of Production V1 (2026-08-02), DropIn is a production product, not a prototype, and the docs in this folder are its single source of truth. New direction gets merged into the relevant document — dated, in-place, nothing silently overwritten — rather than living only in chat history.
 
 ---
 
@@ -67,23 +68,21 @@ When a new idea is introduced, always evaluate whether it belongs in the MVP or 
 
 ## Current Roadmap
 
-**Phase 1 — Homepage**
+**Superseded** — Homepage and Results Page (originally Phases 1–2) were retired entirely during the Product Architecture Review and replaced by the Search Surface (one persistent shell, three states, two overlay sheets). See `docs/INFORMATION_ARCHITECTURE.md`.
+
+**Search Surface — status: production.**
 - Information Architecture ✅
 - Low-Fidelity ✅
-- High-Fidelity ✅
+- High-Fidelity ✅ (including Quick Action Sheet and Product Information Sheet refinement passes)
+- Real data integration ✅ (Toronto Open Data, via the adapter pipeline in `docs/ARCHITECTURE.md`)
+- Universal Search ✅ (Activity / Community Centre / Neighbourhood / City-Municipality / Postal Code, mixed queries, live search with debounce)
+- Promoted to the production app root (`/`) — the `/design` preview route for it has been retired.
 
-**Phase 2 — Results Page**
-- Information Architecture ✅
-- Low-Fidelity ✅
-- High-Fidelity ⏳
-
-**Future Phases**
-
-- Phase 3 — Detail Page
-- Phase 4 — Search Experience
-- Phase 5 — Data Integration
-- Phase 6 — Visual Polish
-- Phase 7 — Beta Testing
+**Open, not yet built:**
+- GTA-wide data coverage beyond Toronto (adapters exist as a pattern; no second municipality is integrated yet — see `docs/ARCHITECTURE.md`'s Current Implementation State)
+- Scheduled/live data sync (current Toronto adapter reads a static, manually-refetched snapshot)
+- Silent geolocation inference for the default location context
+- Map View (not started)
 
 This roadmap should be updated as milestones are completed.
 
@@ -99,6 +98,7 @@ All design explorations live under `/design`, each as its own route (e.g. `/desi
 
 - 2026-07-29 — Replaced the initial workflow structure with this expanded version: added General Principles, the Product Workflow discussion stages, Collaboration Rules, and an explicit phase-based Roadmap. One substantive change worth flagging under the Collaboration Rules above: the prior Design Workflow had 6 stages with two separate Review checkpoints (after Low-Fidelity, and after High-Fidelity, before Production Build). This version consolidates to a single Review & Refinement stage positioned after High-Fidelity. Proceeding on the assumption this consolidation is intentional; flagging it since the Homepage work already completed did receive an explicit review checkpoint before High-Fidelity began, under the prior process. Also preserved the Preview Environment section from the prior version, since it documents the still-current `/design` route convention and wasn't restated here.
 - 2026-07-29 — Added the Decision Principle section: when multiple solutions exist, prefer the one that keeps the user experience simplest, even at the cost of fewer features. Placed directly after General Principles since it governs how tradeoffs get resolved everywhere else in this document.
+- 2026-08-02 — Production V1: rewrote Current Roadmap, which still described the retired three-page architecture (Homepage/Results as separate phases with a stale checklist) despite Search Surface having long since superseded it, gone through real data integration, and been promoted to production. Added the standing note that DropIn is production as of this date and that this docs folder is the single source of truth going forward, per the explicit direction that closed out this sprint.
 
 
 

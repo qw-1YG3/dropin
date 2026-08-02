@@ -24,8 +24,11 @@ Every interaction should reduce the distance between "I want to do something tod
 
 **Verifiable Data Only.** Only present information we can verify. Never invent popularity. Never imply availability. Never create labels that require data we don't have.
 
+**Delegate Whenever Possible.** Navigation belongs to Google Maps. Official schedules belong to recreation providers. Phone calls belong to the phone. DropIn discovers — others execute. This is why the Quick Action Sheet exists at all: it's a handoff point, not a place to recreate what another, better-suited tool already does.
+
 ---
 
 ## Revision Notes
 
 - 2026-07-30 — Initial version, formalizing the Product Architecture Review and the philosophy that superseded the original three-page (Homepage → Results → Detail) structure.
+- 2026-08-02 — Production V1: added "Delegate Whenever Possible" as its own named Core Design Principle — previously implied by the Mission statement and by how the Quick Action Sheet was already built, but not stated as a standalone principle until the canonical Production V1 direction named it explicitly. DropIn is confirmed as a production product as of this date, not a prototype — every principle above is now a live constraint on a shipped surface, not a target for one still being designed.

@@ -30,10 +30,10 @@ Search is responsible for, in every state: being the primary entry point into th
 
 ## Location Context
 
-DropIn maintains **one shared, persistent location context** used across the entire Search Surface — not a per-state or per-page copy. Examples of what it can hold: `Near Me` (default, inferred silently via geolocation), a named place (`North York`), or a postal code (`M2N`).
+DropIn maintains **one shared, persistent location context** used across the entire Search Surface — not a per-state or per-page copy. Examples of what it can hold: `Near you` (default), a named neighbourhood or district (`North York`), a municipality (`Toronto`), or a postal code (`M2N`).
 
-- **Set initially** via silent inference, shown as an editable ambient pill (`📍 Near you`) — never asked as an upfront question.
-- **A search that is purely a location** (typing just a neighbourhood, city, or postal code with no activity) updates this persistent context directly — the user is explicitly telling search where they are.
+- **The Location Pill is display-only — it is not a search field.** Its entire job is to answer "where are these results coming from," not to collect input. There is no click-to-edit affordance; nothing about setting or changing location happens by typing into the pill itself.
+- **Set only through Search.** A search that is purely a location (typing just a neighbourhood, municipality, or postal code with no activity) updates this persistent context directly — the user is explicitly telling search where they are. There is currently no other way to set it (silent geolocation inference remains a stated future capability, not yet implemented — see Future Expansion).
 - **A location detected as part of a mixed query** ("Swimming Scarborough") does *not* update the persistent context — it's a temporary override scoped to that one search. The persistent context is restored automatically as soon as the query is cleared or a new search without a location term is run.
 - **Read identically by Discovery State, Results State, and the Quick Action Sheet** (e.g. for computing directions) — always the *effective* location for the current search (override if one is active, otherwise the persistent context). One source of truth, no state maintains its own copy.
 
@@ -76,8 +76,9 @@ The Decision Principle ("whenever the system can confidently infer intent, it sh
 
 **Discovery state**
 1. Search (large)
-2. Activity shortcuts + verified filters ("Free")
-3. Live results (real nearby-right-now sessions, same card component Results uses)
+2. Quiet explore prompt ("What would you like to do today?") — labels the shortcuts below, not a gate in front of them
+3. Activity shortcuts + verified filters ("Free")
+4. Live results (real nearby-right-now sessions, same card component Results uses; diversified across areas and activities rather than repeating one centre)
 
 **Results state**
 1. Search (demoted)
@@ -121,6 +122,7 @@ Full authoritative list lives in `docs/PRODUCT_PRINCIPLES.md` and `docs/PRODUCT_
 
 How future ideas fit into the Search Surface without reintroducing pages:
 
+- **Silent geolocation inference** — setting the persistent location context automatically from the device's real location, rather than only through an explicit location search. Deferred since Sprint 03; the pill and "Near you" default already assume this shape, so adding it later changes how the persistent context is *set*, not how it's *read* — no redesign required.
 - **Saved activities** — a lightweight addition to Discovery state, not a new screen.
 - **Recently searched** — feeds Searching state's suggestions; doesn't touch Results or the sheets.
 - **Personalization** — influences relevance ranking and which activity shortcuts appear in Discovery; no new states.
@@ -137,3 +139,4 @@ None of these require reintroducing a page. That's the actual test of whether th
 - 2026-07-30 — Removed Search as a step in Product Structure, gave it its own "Search: A Shared Capability" section. Added Location Context and "Scope Controls vs. Ranking Decisions."
 - 2026-07-30 — **Major rewrite.** Retired the three-page architecture (Homepage → Results → Detail) entirely, following the Product Architecture Review. Replaced with one persistent Search Surface with three states (Discovery, Searching, Results) and two overlay sheets (Quick Action Sheet, Product Information Sheet). Detail as a full page is gone — replaced by the Quick Action Sheet. Homepage and Results are no longer separate pages — Discovery state and Results state are two states of the same surface, which also resolves a redundancy the old architecture had: Homepage's "Happening Soon" preview and the Results list were the same kind of content, built twice. Location Context and Scope Controls reasoning carried forward unchanged, since both were already page-agnostic in substance.
 - 2026-07-31 — Documentation Sync Sprint: rewrote Location Context to state the finalized three-part behavior (persistent default, temporary search-location override, restoration on clear) and to point to `docs/SEARCH_ENGINE.md` as the canonical source for the underlying mechanics, rather than restating a coarser version of the same rule that could drift out of sync with it.
+- 2026-08-02 — Production V1: Location Context rewritten again now that the pill is actually built — removed "editable ambient pill" language entirely, since the pill has no click-to-edit affordance and is set only through Search, never by typing into it directly. Added silent geolocation inference to Future Expansion as the explicit placeholder for what "Near you" currently stands in for without doing.

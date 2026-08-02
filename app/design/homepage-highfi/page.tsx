@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { PreviewHeader } from "../_components/PreviewHeader";
-import { ACTIVITY_ICONS, LocationIcon, SearchIcon } from "../_components/icons";
+import { ACTIVITY_ICONS, LocationIcon, SearchIcon } from "../../_components/icons";
 
 const ACTIVITY_SUGGESTIONS = [
   "Badminton",

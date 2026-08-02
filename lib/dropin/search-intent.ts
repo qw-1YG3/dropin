@@ -1,5 +1,6 @@
 import { ACTIVITY_GROUPS } from "./activities";
 import { getDisplayDistrict, matchDistrict, matchDistrictExact } from "./districts";
+import { matchMunicipalityExact, type MunicipalityStatus } from "./municipalities";
 import type { Session } from "./types";
 
 // FSA-level precision is the expected common case for postal code search per
@@ -11,7 +12,7 @@ export type DetectedLocation =
   | { type: "postal"; label: string; fsa: string }
   | { type: "centre"; label: string }
   | { type: "neighbourhood"; label: string }
-  | { type: "city"; label: string };
+  | { type: "municipality"; label: string; status: MunicipalityStatus };
 
 export type ParsedQuery = {
   activities: string[];
@@ -43,21 +44,23 @@ function detectNeighbourhood(text: string): DetectedLocation | undefined {
   return d ? { type: "neighbourhood", label: d } : undefined;
 }
 
-function detectCity(text: string): DetectedLocation | undefined {
-  return text.trim().toLowerCase() === "toronto" ? { type: "city", label: "Toronto" } : undefined;
-}
-
-// Location sub-priority per docs/SEARCH_ENGINE.md: Postal Code first (its
-// shape is unambiguous), then Community Centre, then Neighbourhood, then
-// City — except an exact district-name match jumps the queue ahead of
-// Community Centre, since an exact match is a stronger signal than a loose
-// substring match against a differently-typed entity (a facility whose
-// formal name happens to contain a district word, e.g. "Centennial
-// Recreation Centre - Scarborough").
+// Location sub-priority per the canonical Production V1 direction: Activity
+// (handled separately in parseQuery), then Community Centre, then
+// Neighbourhood, then City/Municipality, then Postal Code (deliberately
+// checked last — postal codes should be understood, not be the primary
+// interaction model). An exact district or municipality name jumps the
+// queue ahead of Community Centre regardless, since an exact match is a
+// stronger signal than a loose substring match against a differently-typed
+// entity (a facility whose formal name happens to contain a district word,
+// e.g. "Centennial Recreation Centre - Scarborough").
 function detectLocation(text: string, centreNames: string[]): DetectedLocation | undefined {
   const exactDistrict = matchDistrictExact(text);
   if (exactDistrict) return { type: "neighbourhood", label: exactDistrict };
-  return detectPostalCode(text) ?? detectCentre(text, centreNames) ?? detectNeighbourhood(text) ?? detectCity(text);
+
+  const exactMunicipality = matchMunicipalityExact(text);
+  if (exactMunicipality) return { type: "municipality", label: exactMunicipality.name, status: exactMunicipality.status };
+
+  return detectCentre(text, centreNames) ?? detectNeighbourhood(text) ?? detectPostalCode(text);
 }
 
 function matchActivity(text: string, knownActivityNames: string[]): string[] {
@@ -111,7 +114,7 @@ export function sessionMatchesLocation(session: Session, location: DetectedLocat
       return session.centre === location.label;
     case "neighbourhood":
       return getDisplayDistrict(session.district) === location.label;
-    case "city":
-      return true;
+    case "municipality":
+      return session.municipality === location.label;
   }
 }

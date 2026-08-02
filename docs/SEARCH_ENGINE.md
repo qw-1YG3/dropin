@@ -8,22 +8,22 @@ Five intents. A query may express one, several combined, or none clearly.
 
 - **Activity** — a sport, program, or class name or synonym ("badminton", "swim", "ping pong"). Resolves to one or more canonical Activities via the Activity/Group/Category model.
 - **Community Centre** — a specific named facility ("Regent Park Community Centre," or an informal partial like "Regent Park CC").
-- **Postal Code** — a Canadian postal code, full or FSA-only ("M5A 1C7" or just "M5A"). FSA-level precision is the expected common case — most users won't type a full postal code, and FSA is sufficient for neighbourhood-scale location.
-- **Neighbourhood** — an informal geographic area name ("North York," "Scarborough," "The Beaches") — distinct from a City and distinct from a Community Centre name, though the three can overlap in casual language (e.g., "Regent Park" names both a neighbourhood and a centre).
-- **City** — for MVP, effectively only "Toronto." The intent exists now so the pipeline generalizes cleanly when multi-city support arrives (per Future Expansion in `docs/INFORMATION_ARCHITECTURE.md`), not because it does meaningful work today.
+- **Neighbourhood** — an informal geographic area name ("North York," "Scarborough," "The Beaches") — distinct from a Municipality and distinct from a Community Centre name, though the three can overlap in casual language (e.g., "Regent Park" names both a neighbourhood and a centre).
+- **City / Municipality** — the municipality a session belongs to ("Toronto," "Mississauga," "Markham"). Not MVP-scoped to a single city: DropIn's target coverage is the GTA and beyond, and this intent resolves against whichever municipalities are actually registered as data sources (see `docs/ARCHITECTURE.md`'s Multi-Municipality Support). A recognized-but-not-yet-integrated municipality is a distinct, honest outcome from "no match" — see Empty/No-Results Behavior.
+- **Postal Code** — a Canadian postal code, full or FSA-only ("M5A 1C7" or just "M5A"). FSA-level precision is the expected common case — most users won't type a full postal code, and FSA is sufficient for neighbourhood-scale location. Understood, but deliberately not the primary interaction model — see Intent Detection Priority.
 
 ## Intent Detection Priority
 
-Detection runs in this order, because each subsequent check is progressively less certain:
+Detection runs in this order:
 
-1. **Postal Code — pattern-based, checked first.** A Canadian postal code has an unmistakable shape (letter-digit-letter, optionally followed by digit-letter-digit). This can be recognized from the string's shape alone, with no reference list — so it's the one intent that's ever unambiguous, and should short-circuit the rest of detection when it matches.
-2. **Activity — checked next, and checked generously.** Per Product Philosophy's "Search is the Product" and Activity First, Activity is the default assumption for anything that isn't clearly a location. Matching runs against canonical names, synonyms, and keywords (the Activity/Group/Category term model).
-3. **Community Centre — reference-list lookup.** Unlike Postal Code, this requires checking the query against a known set of facility names; it can't be detected from shape alone.
-4. **Neighbourhood — reference-list lookup**, same mechanism as Community Centre, against a different known list.
-5. **City — reference-list lookup**, checked last since for MVP it almost never adds information (there's only one city).
+1. **Activity — checked first, and checked generously.** Per Product Philosophy's "Search is the Product" and Activity First, Activity is the default assumption and DropIn's primary mental model. Matching runs against canonical names, synonyms, and keywords (the Activity/Group/Category term model).
+2. **Community Centre — reference-list lookup.** Checked against the known set of facility names for whichever municipalities are registered.
+3. **Neighbourhood — reference-list lookup**, same mechanism as Community Centre, against a different known list.
+4. **City / Municipality — reference-list lookup** against registered and target municipality names.
+5. **Postal Code — pattern-based, checked last.** A Canadian postal code has an unmistakable shape (letter-digit-letter, optionally followed by digit-letter-digit), so it never needs to compete for priority the way the reference-list intents do — it's understood whenever typed, but deliberately not positioned as the primary interaction model, so it doesn't get first claim on ambiguous input.
 6. **Fallback** — if nothing matches confidently, attempt forgiving/typo-tolerant Activity matching (per `docs/SEARCH_PRINCIPLES.md`'s Forgiving Search) before conceding to the no-results behavior below.
 
-Activity intentionally sits above the location intents in priority: real collisions between activity names and place names are rare, and when the product has to guess, it should guess toward its own primary axis.
+Within the location intents, an **exact** match on a Neighbourhood or Municipality name jumps ahead of a **fuzzy/substring** Community Centre match, regardless of the type priority above — otherwise a facility whose formal name happens to contain a place word (e.g. "Centennial Recreation Centre - Scarborough") would outrank the place itself when someone typed exactly "Scarborough." Confidence of match beats type priority when the two disagree.
 
 ## Mixed Query Parsing
 
@@ -54,11 +54,12 @@ Consistent with the Decision Principle (no manual sort, ever) and existing Ranki
 
 ## Empty / No-Results Behavior
 
-Three distinct situations, each needing different messaging — conflating them would misrepresent what the system actually knows:
+Four distinct situations, each needing different messaging — conflating them would misrepresent what the system actually knows:
 
 - **A near match exists** (typo, or a synonym gap) — auto-resolve and say so plainly: "Showing results for Table Tennis."
 - **The query didn't resolve to anything recognized** (neither Activity nor location) — never a blank page. Fall back to Discovery Intent scoped to the persistent Near You context, with a line acknowledging the miss: "We couldn't find '[query]' — here's what's on nearby instead."
 - **The query resolved perfectly, but there are genuinely zero matching sessions** (e.g., a real Activity, a real Neighbourhood, no sessions exist for that pair right now) — this is not a failure to understand, and shouldn't be phrased like one. Say so specifically: "No [Activity] sessions found near [Location] right now," and offer a concrete way forward (widen to all of Toronto, or see other activities near that location) rather than a generic dead end.
+- **The query resolved to a real municipality that simply isn't integrated yet** (e.g. "swimming Markham") — this is neither "unrecognized" nor "genuinely zero results," and phrasing it like either would be dishonest: "unrecognized" implies the name meant nothing, "zero results" implies we checked Markham and it had none. Neither is true — we haven't checked, because there's no data source for it yet. Say so directly: "DropIn doesn't cover [Municipality] yet — here's what's available in [nearest covered municipality] instead." This is the one situation where "no dead end" doesn't mean "keep looking within this municipality" — it means "hand back to somewhere DropIn can actually answer."
 
 ## Search State Transitions
 
@@ -90,3 +91,4 @@ Normalize → Intent Detection → Search Context → Search → Rank → Result
 
 - 2026-07-31 — Initial version. Written specifically to close the gap the Search Surface audit surfaced: Universal Search (Activity / Community Centre / City / Postal Code / Neighbourhood) was documented as a decision in `docs/SEARCH_PRINCIPLES.md` but had no behavioral specification precise enough to implement against. This document is that specification, and additionally refines the Location Context spec in `docs/INFORMATION_ARCHITECTURE.md` with the override-vs-persistent distinction that mixed-query parsing requires.
 - 2026-07-31 — Documentation Sync Sprint: added the Search State Transitions section, resolving the previously open "typed but never submitted" question with a canonical debounce (~300ms auto-commit) rule. Reworded Location Override framing now that `docs/INFORMATION_ARCHITECTURE.md` has been updated to match this document, rather than describing it as the coarser, out-of-sync version it was before.
+- 2026-08-02 — Production V1: the ~300ms debounce auto-commit specified above is now actually implemented (it had been written but not built since 2026-07-31). Intent Detection Priority reordered — Activity now checked first and Postal Code last, matching the canonical Production V1 direction rather than the earlier shape-based-detection-first reasoning; added the exact-match-beats-fuzzy-match rule that the reordering surfaced as a real bug during implementation (a facility named "Centennial Recreation Centre - Scarborough" was outranking the Scarborough neighbourhood itself). Replaced City with City/Municipality throughout and pointed it at `docs/ARCHITECTURE.md`'s Multi-Municipality Support instead of the old Toronto-only MVP framing. Added the fourth Empty/No-Results case for a real-but-not-yet-integrated municipality, distinct from both "unrecognized" and "genuinely zero results" — verified two real examples (Mississauga, Markham) genuinely have no integrable open data before writing this, rather than assuming.
