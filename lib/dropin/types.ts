@@ -54,6 +54,8 @@ export type Session = {
   urgent: boolean;
   absoluteTime: string;
   centre: string;
+  district: string;
+  postalCode?: string;
   distanceKm?: number;
   price?: string;
   phone?: string;

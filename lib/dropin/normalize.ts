@@ -69,6 +69,8 @@ export function normalizeSessions(now: Date = new Date()): Session[] {
     const location = locationById.get(r["Location ID"]);
     if (!location) continue;
 
+    const postalCode = location["Postal Code"];
+
     sessions.push({
       id: r._id,
       activity: r["Course Title"],
@@ -76,6 +78,8 @@ export function normalizeSessions(now: Date = new Date()): Session[] {
       urgent: isUrgent(start, end, now),
       absoluteTime: formatAbsoluteTime(r["Start Hour"], r["Start Minute"], r["End Hour"], r["End Min"]),
       centre: location["Location Name"],
+      district: location["District"],
+      postalCode: postalCode && postalCode !== "None" ? postalCode : undefined,
     });
   }
 

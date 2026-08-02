@@ -14,19 +14,13 @@ import {
   ShareIcon,
 } from "../_components/icons";
 import { ACTIVITY_GROUPS, getShortcutForActivity, SHORTCUTS } from "@/lib/dropin/activities";
+import { getDisplayDistrict } from "@/lib/dropin/districts";
+import { parseQuery, sessionMatchesLocation, type DetectedLocation } from "@/lib/dropin/search-intent";
 import type { Day, Session } from "@/lib/dropin/types";
 
-const SUGGESTION_POOL = ["Badminton", "Pickleball", "Basketball", "Swimming", "Lane Swim", "Leisure Swim", "Yoga", "Open Gym"];
+const SUGGESTION_POOL = ["Badminton", "Pickleball", "Basketball", "Swimming", "Lane Swim", "Leisure Swim", "Yoga", "Open Gym", "Table Tennis"];
 
 const DAY_LABELS: Record<Day, string> = { today: "Today", tomorrow: "Tomorrow" };
-
-function resolveActivities(query: string, sessions: Session[]): string[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-  if (ACTIVITY_GROUPS[q]) return ACTIVITY_GROUPS[q];
-  const match = sessions.find((s) => s.activity.toLowerCase().includes(q));
-  return match ? [match.activity] : [];
-}
 
 function timeLabel(s: Session) {
   const prefix = s.day === "today" ? (s.urgent ? "Happening soon" : "Today") : "Tomorrow";
@@ -95,8 +89,12 @@ export default function SearchSurface() {
   const [feedbackStage, setFeedbackStage] = useState<"idle" | "writing" | "sent">("idle");
   const [feedbackText, setFeedbackText] = useState("");
   const [loading, setLoading] = useState(true);
-  const [locationLabel, setLocationLabel] = useState("Near you");
-  const [editingLocation, setEditingLocation] = useState(false);
+  // Persistent location context (set only by a pure-location search) vs. a
+  // one-time override (set by a mixed activity+location search). The pill
+  // always displays the effective one; neither is ever typed into directly.
+  const [persistentLocation, setPersistentLocation] = useState<DetectedLocation | undefined>(undefined);
+  const [locationOverride, setLocationOverride] = useState<DetectedLocation | undefined>(undefined);
+  const [queryMiss, setQueryMiss] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const directionsRef = useRef<HTMLAnchorElement>(null);
@@ -121,25 +119,64 @@ export default function SearchSurface() {
     return SUGGESTION_POOL.filter((s) => s.toLowerCase().includes(q)).slice(0, 6);
   }, [query, suggestionsOpen]);
 
-  const discoveryHighlights = useMemo(() => {
-    const todayPool = sessions.filter((s) => s.day === "today");
-    if (discoveryFreeOnly) return todayPool.filter((s) => s.price === "Free");
-    // Urgent (happening-soon) sessions always surface first in the top-4 —
-    // relevance the user can act on immediately shouldn't lose to array order.
-    const ranked = [...todayPool].sort((a, b) => Number(b.urgent) - Number(a.urgent));
-    return ranked.slice(0, 4);
-  }, [sessions, discoveryFreeOnly]);
+  const effectiveLocation = locationOverride ?? persistentLocation;
 
-  const matchedActivities = useMemo(() => resolveActivities(committedQuery, sessions), [committedQuery, sessions]);
+  const discoveryHighlights = useMemo(() => {
+    let pool = sessions.filter((s) => s.day === "today");
+    if (persistentLocation) pool = pool.filter((s) => sessionMatchesLocation(s, persistentLocation));
+    if (discoveryFreeOnly) return pool.filter((s) => s.price === "Free");
+
+    // Diversify across districts and activities so Discovery reads as a
+    // cross-city sample rather than repeating whichever centre happens to
+    // have the most listings — urgent sessions still surface first within
+    // that diverse set.
+    const ranked = [...pool].sort((a, b) => Number(b.urgent) - Number(a.urgent));
+    const seenDistricts = new Set<string>();
+    const seenActivities = new Set<string>();
+    const diverse: Session[] = [];
+    for (const s of ranked) {
+      const district = getDisplayDistrict(s.district);
+      if (seenDistricts.has(district) && seenActivities.has(s.activity)) continue;
+      diverse.push(s);
+      seenDistricts.add(district);
+      seenActivities.add(s.activity);
+      if (diverse.length === 5) break;
+    }
+    const target = Math.min(5, ranked.length);
+    for (const s of ranked) {
+      if (diverse.length >= target) break;
+      if (!diverse.includes(s)) diverse.push(s);
+    }
+    return diverse;
+  }, [sessions, discoveryFreeOnly, persistentLocation]);
+
+  const parsed = useMemo(() => parseQuery(committedQuery, sessions), [committedQuery, sessions]);
+  const matchedActivities = parsed.activities;
+
+  const baseResults = useMemo(() => {
+    return sessions.filter((s) => {
+      if (matchedActivities.length > 0 && !matchedActivities.includes(s.activity)) return false;
+      if (effectiveLocation && !sessionMatchesLocation(s, effectiveLocation)) return false;
+      return true;
+    });
+  }, [sessions, matchedActivities, effectiveLocation]);
+
+  // Filter chips reflect activities actually present in the current
+  // activity+location scope, not just the raw parsed match — this way a
+  // pure-location search ("North York") still offers useful chips to
+  // refine by, instead of only ever showing "All".
+  const filterChipActivities = useMemo(
+    () => Array.from(new Set(baseResults.map((s) => s.activity))),
+    [baseResults],
+  );
 
   const resultsFiltered = useMemo(() => {
-    return sessions.filter((s) => {
-      if (!matchedActivities.includes(s.activity)) return false;
+    return baseResults.filter((s) => {
       if (timeWindow === "today" && s.day === "tomorrow") return false;
       if (activeFilter !== "All" && s.activity !== activeFilter) return false;
       return true;
     });
-  }, [sessions, matchedActivities, activeFilter, timeWindow]);
+  }, [baseResults, activeFilter, timeWindow]);
 
   const resultsByDay = useMemo(() => {
     const order: Day[] = timeWindow === "week" ? ["today", "tomorrow"] : ["today"];
@@ -148,21 +185,77 @@ export default function SearchSurface() {
       .filter((d) => d.sessions.length > 0);
   }, [resultsFiltered, timeWindow]);
 
+  const emptyStateMessage = useMemo(() => {
+    const activityLabel =
+      matchedActivities.length === 1 ? matchedActivities[0] : matchedActivities.length > 1 ? committedQuery : "activities";
+    const scope = timeWindow === "week" ? "this week" : "today";
+    return effectiveLocation
+      ? `No ${activityLabel} sessions found in ${effectiveLocation.label} ${scope}.`
+      : `No ${activityLabel} sessions found ${scope}.`;
+  }, [matchedActivities, committedQuery, effectiveLocation, timeWindow]);
+
+  // Only ever suggests activities that actually have real sessions in the
+  // current location/time scope — never a dead-end suggestion.
+  const alternateActivitySuggestions = useMemo(() => {
+    const candidates = [...SHORTCUTS, "Table Tennis"].filter((a) => !matchedActivities.includes(a));
+    return candidates
+      .filter((a) => {
+        const group = ACTIVITY_GROUPS[a.toLowerCase()] ?? [a];
+        return sessions.some(
+          (s) =>
+            group.includes(s.activity) &&
+            (timeWindow === "week" || s.day === "today") &&
+            (!effectiveLocation || sessionMatchesLocation(s, effectiveLocation)),
+        );
+      })
+      .slice(0, 2);
+  }, [sessions, matchedActivities, effectiveLocation, timeWindow]);
+
   function commitQuery(q: string) {
+    const trimmed = q.trim();
     setQuery(q);
-    setCommittedQuery(q);
     setSuggestionsOpen(false);
     setActiveFilter("All");
     setTimeWindow("today");
+
+    const result = parseQuery(trimmed, sessions);
+
+    if (result.activities.length === 0 && !result.location) {
+      // Query didn't resolve to anything recognized — never a dead end.
+      // Fall back to Discovery Intent, scoped to the persistent context,
+      // with a line acknowledging the miss.
+      setQueryMiss(trimmed);
+      setCommittedQuery("");
+      setLocationOverride(undefined);
+      setSurfaceState("discovery");
+      return;
+    }
+
+    setQueryMiss(null);
+    setCommittedQuery(trimmed);
     setSurfaceState("results");
+
+    if (result.location && result.activities.length === 0) {
+      // Purely a location search — updates the persistent context directly.
+      setPersistentLocation(result.location);
+      setLocationOverride(undefined);
+    } else if (result.location) {
+      // Mixed query — a one-time override, scoped to this search only.
+      setLocationOverride(result.location);
+    } else {
+      // Activity-only — an override never silently persists.
+      setLocationOverride(undefined);
+    }
   }
 
   function handleInputChange(value: string) {
     setQuery(value);
     setSuggestionsOpen(true);
+    if (value.trim() !== "") setQueryMiss(null);
     if (surfaceState === "results" && value.trim() === "") {
       setSurfaceState("discovery");
       setCommittedQuery("");
+      setLocationOverride(undefined);
     }
   }
 
@@ -182,36 +275,12 @@ export default function SearchSurface() {
         <header className="flex items-center justify-between py-4">
           <span className="text-lg font-semibold tracking-tight text-gray-900">DropIn</span>
           <div className="flex items-center gap-3">
-            {editingLocation ? (
-              <input
-                autoFocus
-                defaultValue={locationLabel === "Near you" ? "" : locationLabel}
-                placeholder="Postal code or neighbourhood"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    const v = (e.target as HTMLInputElement).value.trim();
-                    setLocationLabel(v || "Near you");
-                    setEditingLocation(false);
-                  }
-                  if (e.key === "Escape") setEditingLocation(false);
-                }}
-                onBlur={(e) => {
-                  const v = e.target.value.trim();
-                  setLocationLabel(v || "Near you");
-                  setEditingLocation(false);
-                }}
-                className="w-36 rounded-md border border-gray-200 px-2 py-1 text-sm text-gray-700 outline-none focus:border-accent"
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={() => setEditingLocation(true)}
-                className="flex items-center gap-1 text-sm text-gray-500 hover:text-accent"
-              >
-                <LocationIcon className="h-4 w-4 text-gray-400" />
-                {locationLabel}
-              </button>
-            )}
+            {/* Current Search Area — display only. It reflects wherever the
+                search just resolved to; it is never typed into directly. */}
+            <span className="flex items-center gap-1 text-sm text-gray-500">
+              <LocationIcon className="h-4 w-4 text-gray-400" />
+              {effectiveLocation ? effectiveLocation.label : "Near you"}
+            </span>
             <button
               type="button"
               aria-label="About DropIn"
@@ -228,7 +297,7 @@ export default function SearchSurface() {
             real results, so nothing needs to ask "what do you want" first. */}
         <div className={`relative ${large ? "pt-2 pb-5" : "py-4"}`}>
           <label htmlFor="surface-search" className="sr-only">
-            Search activities or locations
+            Search activities, community centres or places
           </label>
           <div className="relative">
             <SearchIcon
@@ -241,7 +310,7 @@ export default function SearchSurface() {
               value={query}
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleSearchKeyDown}
-              placeholder="Search activities or locations"
+              placeholder="Search activities, community centres or places"
               className={`w-full rounded-2xl border border-gray-200 bg-white text-gray-900 shadow-sm outline-none transition-all duration-200 placeholder:text-gray-500 hover:border-gray-300 focus:border-accent focus:ring-2 focus:ring-accent/40 ${
                 large ? "py-4 pl-12 pr-4 text-base" : "py-2.5 pl-10 pr-4 text-sm"
               }`}
@@ -268,6 +337,14 @@ export default function SearchSurface() {
         {/* ===================== DISCOVERY STATE ===================== */}
         {surfaceState === "discovery" && (
           <section className="pb-10">
+            {queryMiss && (
+              <p className="mb-4 rounded-xl bg-gray-100 px-4 py-3 text-sm text-gray-600">
+                We couldn&rsquo;t find &ldquo;{queryMiss}&rdquo; — here&rsquo;s what&rsquo;s on nearby instead.
+              </p>
+            )}
+
+            <p className="mb-3 text-sm font-medium text-gray-600">What would you like to do today?</p>
+
             <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
               {SHORTCUTS.map((chip) => {
                 const Icon = ACTIVITY_ICONS[chip];
@@ -299,7 +376,7 @@ export default function SearchSurface() {
             </div>
 
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Happening near you
+              {persistentLocation ? `Happening in ${persistentLocation.label}` : "Happening near you"}
             </h2>
 
             {loading ? (
@@ -330,7 +407,7 @@ export default function SearchSurface() {
           <section className="pb-10">
             <p className="mb-2 text-sm text-gray-600">{`${committedQuery} options`}</p>
             <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-              {["All", ...matchedActivities].map((f) => {
+              {["All", ...filterChipActivities].map((f) => {
                 const active = activeFilter === f;
                 return (
                   <button
@@ -374,9 +451,43 @@ export default function SearchSurface() {
 
             <div className="space-y-8">
               {resultsFiltered.length === 0 ? (
-                <p className="py-16 text-center text-sm text-gray-500">
-                  No activities match this filter. Try a different activity or widen the time window.
-                </p>
+                <div className="py-12 text-center">
+                  <p className="text-sm text-gray-500">{emptyStateMessage}</p>
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Try</p>
+                  <div className="mt-2 flex flex-wrap justify-center gap-2">
+                    {timeWindow === "today" && (
+                      <button
+                        type="button"
+                        onClick={() => setTimeWindow("week")}
+                        className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
+                      >
+                        This Week
+                      </button>
+                    )}
+                    {effectiveLocation && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLocationOverride(undefined);
+                          setPersistentLocation(undefined);
+                        }}
+                        className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
+                      >
+                        Nearby areas
+                      </button>
+                    )}
+                    {alternateActivitySuggestions.map((a) => (
+                      <button
+                        key={a}
+                        type="button"
+                        onClick={() => commitQuery(a)}
+                        className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
+                      >
+                        {a}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ) : (
                 resultsByDay.map((d) => (
                   <div key={d.key}>

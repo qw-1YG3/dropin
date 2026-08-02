@@ -27,6 +27,7 @@ export const ACTIVITY_GROUPS: Record<string, string[]> = {
     "Leisure Swim (Women)",
     "Lane Swim (Women)",
   ],
+  "table tennis": ["Table Tennis"],
 };
 
 export const SHORTCUTS = ["Badminton", "Swimming", "Pickleball", "Basketball", "Yoga", "Open Gym"];
@@ -51,6 +52,7 @@ const COURSE_TITLE_TO_SHORTCUT: Record<string, string> = {
   "Lane Swim: Family": "Swimming",
   "Leisure Swim (Women)": "Swimming",
   "Lane Swim (Women)": "Swimming",
+  "Table Tennis": "Table Tennis",
 };
 
 export function getShortcutForActivity(activity: string): string | undefined {
