@@ -104,7 +104,11 @@ body {
   }
 
   .dropdown-exit {
-    animation: fade-slide-out 150ms ease-out;
+    /* both: without an explicit fill-mode this reverts to fully visible the
+       instant the animation finishes, which can land before the 150ms JS
+       unmount timer in page.tsx actually removes the list — the same class
+       of flash fixed on the Sheet. */
+    animation: fade-slide-out 150ms ease-out both;
   }
 }
 

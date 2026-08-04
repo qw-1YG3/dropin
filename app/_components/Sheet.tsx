@@ -3,9 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { CloseIcon } from "./icons";
 
-// How long the reverse (closing) animation plays before the sheet actually
-// unmounts — inside the 150–220ms band, and short enough that it never
-// reads as a delay to whatever the user does next.
+// The single source of truth for how long closing takes — drives the
+// scrim's fadeOut, the panel's slideDown/scaleOut, AND the JS unmount timer
+// below. All three must match exactly: if the CSS animation and the timer
+// disagree, there's a guaranteed window where the animation has already
+// finished (and, without an explicit fill-mode, reverted to fully visible)
+// before React actually removes the element — a brief flash of the
+// scrim/panel reappearing right before it's gone.
 const EXIT_DURATION_MS = 200;
 
 type SheetProps = {
@@ -74,6 +78,19 @@ export function Sheet({
   const [shouldRender, setShouldRender] = useState(open);
   const [closing, setClosing] = useState(false);
 
+  // Callers often derive `children`/`titleSlot` from state that's cleared
+  // the instant `onClose` fires (e.g. the Quick Action Sheet's `selectedSession
+  // && ...`) — that state going null and `open` going false happen in the
+  // same render. Without this, the sheet would stay mounted to animate out
+  // as designed, but with genuinely empty content, since the prop itself
+  // has already gone blank. Freezing the last real content while `open` is
+  // true means the closing sheet keeps showing what the user was just
+  // looking at instead of flashing empty.
+  const lastContent = useRef<{ children: React.ReactNode; titleSlot: React.ReactNode }>({ children, titleSlot });
+  if (open) {
+    lastContent.current = { children, titleSlot };
+  }
+
   useEffect(() => {
     if (open) {
       setShouldRender(true);
@@ -110,7 +127,11 @@ export function Sheet({
         aria-label="Close"
         onClick={onClose}
         tabIndex={closing ? -1 : undefined}
-        className={`absolute inset-0 bg-text-primary/30 ${closing ? "pointer-events-none motion-safe:animate-[fadeOut_150ms_ease-out]" : "motion-safe:animate-[fadeIn_150ms_ease-out]"}`}
+        className={`absolute inset-0 bg-text-primary/30 ${
+          closing
+            ? `pointer-events-none motion-safe:animate-[fadeOut_${EXIT_DURATION_MS}ms_ease-out_both]`
+            : "motion-safe:animate-[fadeIn_150ms_ease-out_both]"
+        }`}
       />
       <div
         role="dialog"
@@ -118,12 +139,14 @@ export function Sheet({
         aria-labelledby={titleId}
         className={`relative w-full max-w-2xl border border-border bg-white p-5 shadow-[0_16px_40px_-8px_rgba(47,43,39,0.20)] ${
           closing
-            ? "pointer-events-none motion-safe:animate-[slideDown_200ms_cubic-bezier(0.16,1,0.3,1)]"
-            : "motion-safe:animate-[slideUp_240ms_cubic-bezier(0.16,1,0.3,1)]"
+            ? `pointer-events-none motion-safe:animate-[slideDown_${EXIT_DURATION_MS}ms_cubic-bezier(0.16,1,0.3,1)_both]`
+            : "motion-safe:animate-[slideUp_240ms_cubic-bezier(0.16,1,0.3,1)_both]"
         } ${
           isModal
             ? `rounded-t-2xl border-b-0 ${narrow ? "md:max-w-sm" : "md:max-w-md"} md:rounded-2xl md:border-b ${
-                closing ? "md:motion-safe:animate-[scaleOut_200ms_cubic-bezier(0.16,1,0.3,1)]" : "md:motion-safe:animate-[scaleIn_220ms_cubic-bezier(0.16,1,0.3,1)]"
+                closing
+                  ? `md:motion-safe:animate-[scaleOut_${EXIT_DURATION_MS}ms_cubic-bezier(0.16,1,0.3,1)_both]`
+                  : "md:motion-safe:animate-[scaleIn_220ms_cubic-bezier(0.16,1,0.3,1)_both]"
               }`
             : "rounded-t-2xl border-b-0"
         }`}
@@ -132,7 +155,7 @@ export function Sheet({
           <div className="h-1 w-10 rounded-full bg-border" aria-hidden="true" />
         </div>
         <div className="mb-3 flex items-center justify-between gap-3">
-          {titleSlot}
+          {lastContent.current.titleSlot}
           <button
             ref={closeButtonRef}
             type="button"
@@ -143,7 +166,7 @@ export function Sheet({
             <CloseIcon className="h-4 w-4" />
           </button>
         </div>
-        {children}
+        {lastContent.current.children}
       </div>
     </div>
   );

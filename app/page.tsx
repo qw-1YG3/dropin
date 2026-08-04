@@ -620,7 +620,7 @@ export default function SearchSurface() {
         {/* ===================== DISCOVERY STATE ===================== */}
         {displaySurfaceState === "discovery" && (
           <section
-            className={`pb-10 ${surfaceExiting ? "motion-safe:animate-[fadeOut_100ms_ease-out]" : "motion-safe:animate-[cardIn_220ms_ease-out_both]"}`}
+            className={`pb-10 ${surfaceExiting ? "motion-safe:animate-[fadeOut_100ms_ease-out_both]" : "motion-safe:animate-[cardIn_220ms_ease-out_both]"}`}
           >
             {queryMiss && (
               <p className="mb-4 rounded-xl border border-border bg-hover-surface px-4 py-3 text-sm text-text-secondary">
@@ -695,7 +695,7 @@ export default function SearchSurface() {
         {/* ===================== RESULTS STATE ===================== */}
         {displaySurfaceState === "results" && (
           <section
-            className={`pb-10 ${surfaceExiting ? "motion-safe:animate-[fadeOut_100ms_ease-out]" : "motion-safe:animate-[cardIn_220ms_ease-out_both]"}`}
+            className={`pb-10 ${surfaceExiting ? "motion-safe:animate-[fadeOut_100ms_ease-out_both]" : "motion-safe:animate-[cardIn_220ms_ease-out_both]"}`}
           >
             <p className="mb-2 text-sm text-text-secondary">
               {activityDisplayLabel ? `${activityDisplayLabel} activities` : `Activities in ${effectiveLocation?.label ?? committedQuery}`}
