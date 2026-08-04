@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Sheet } from "./_components/Sheet";
 import {
   ACTIVITY_ICONS,
+  ComfortableListIcon,
+  CompactListIcon,
   DirectionsIcon,
   InfoIcon,
   LinkIcon,
@@ -15,11 +17,16 @@ import {
 import { ACTIVITY_GROUPS, getShortcutForActivity, SHORTCUTS } from "@/lib/dropin/activities";
 import { getDisplayDistrict } from "@/lib/dropin/districts";
 import { parseQuery, sessionMatchesLocation, type DetectedLocation } from "@/lib/dropin/search-intent";
-import type { Day, Session } from "@/lib/dropin/types";
+import type { Session } from "@/lib/dropin/types";
 
 const SUGGESTION_POOL = ["Badminton", "Pickleball", "Basketball", "Swimming", "Lane Swim", "Leisure Swim", "Yoga", "Open Gym", "Table Tennis"];
 
-const DAY_LABELS: Record<Day, string> = { today: "Today", tomorrow: "Tomorrow" };
+type ResultGroup = "startingSoon" | "today" | "tomorrow";
+const RESULT_GROUP_LABELS: Record<ResultGroup, string> = {
+  startingSoon: "Starting Soon",
+  today: "Today",
+  tomorrow: "Tomorrow",
+};
 
 function timeLabel(s: Session) {
   const prefix = s.day === "today" ? (s.urgent ? "Happening soon" : "Today") : "Tomorrow";
@@ -33,7 +40,36 @@ function secondaryActionCount(s: Session) {
   return 1 + (s.officialUrl ? 1 : 0) + (s.phone ? 1 : 0);
 }
 
-function SessionCard({ s, onSelect }: { s: Session; onSelect: (s: Session) => void }) {
+type Density = "comfortable" | "compact";
+
+// Compact keeps every field Comfortable shows (activity, time, centre,
+// price) — it's not a reduced-information view, just a tighter one:
+// activity+price share a line, time+centre share a line. Same card
+// component, same click target, same data — only the internal layout and
+// type scale shrink, per "reduce height significantly, preserve
+// readability, one-column scrolling" rather than a grid.
+function SessionCard({ s, onSelect, density = "comfortable" }: { s: Session; onSelect: (s: Session) => void; density?: Density }) {
+  if (density === "compact") {
+    return (
+      <button
+        type="button"
+        onClick={() => onSelect(s)}
+        className="w-full rounded-xl border border-gray-100 bg-white px-4 py-2.5 text-left transition-shadow duration-200 hover:shadow-md"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <p className="truncate text-[15px] font-bold leading-tight text-gray-900">{s.activity}</p>
+          {s.price && <span className="flex-shrink-0 text-xs text-gray-500">{s.price}</span>}
+        </div>
+        <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-gray-600">
+          {s.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-status" aria-hidden="true" />}
+          <span className={s.urgent ? "font-semibold text-status" : ""}>{timeLabel(s)}</span>
+          <span className="text-gray-300">·</span>
+          <span className="truncate">{s.centre}</span>
+        </p>
+      </button>
+    );
+  }
+
   return (
     <button
       type="button"
@@ -45,10 +81,10 @@ function SessionCard({ s, onSelect }: { s: Session; onSelect: (s: Session) => vo
           <p className="text-[18px] font-bold leading-tight text-gray-900">{s.activity}</p>
           <p
             className={`mt-0.5 flex items-center gap-1.5 text-sm ${
-              s.urgent ? "font-semibold text-accent" : "font-medium text-gray-700"
+              s.urgent ? "font-semibold text-status" : "font-medium text-gray-700"
             }`}
           >
-            {s.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent" aria-hidden="true" />}
+            {s.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-status" aria-hidden="true" />}
             {timeLabel(s)}
           </p>
           <p className="mt-4 text-sm text-gray-500">
@@ -95,8 +131,22 @@ export default function SearchSurface() {
   const [locationOverride, setLocationOverride] = useState<DetectedLocation | undefined>(undefined);
   const [queryMiss, setQueryMiss] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
+  // Results-only presentation choice (Discovery's highlights always stay
+  // Comfortable) — remembered across sessions since it's a stable reading
+  // preference, not a per-search setting.
+  const [density, setDensity] = useState<Density>("comfortable");
   const inputRef = useRef<HTMLInputElement>(null);
   const directionsRef = useRef<HTMLAnchorElement>(null);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem("dropin-results-density");
+    if (stored === "comfortable" || stored === "compact") setDensity(stored);
+  }, []);
+
+  function setDensityPersisted(next: Density) {
+    setDensity(next);
+    window.localStorage.setItem("dropin-results-density", next);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -177,11 +227,25 @@ export default function SearchSurface() {
     });
   }, [baseResults, activeFilter, timeWindow]);
 
+  // Urgent sessions surface in their own group ahead of the rest of Today,
+  // so the most time-sensitive activities need zero scanning effort to
+  // find. Sorted by start time within each group — real data (startMinutes,
+  // computed from the actual schedule). Distance would be the requested
+  // secondary sort key, but no session has one: Toronto Open Data has no
+  // coordinates and geolocation isn't built yet (Session.distanceKm is
+  // undefined for every real session), so sorting by it would mean sorting
+  // by nothing — left out rather than faked.
   const resultsByDay = useMemo(() => {
-    const order: Day[] = timeWindow === "week" ? ["today", "tomorrow"] : ["today"];
-    return order
-      .map((key) => ({ key, sessions: resultsFiltered.filter((s) => s.day === key) }))
-      .filter((d) => d.sessions.length > 0);
+    const byStartTime = (list: Session[]) => [...list].sort((a, b) => a.startMinutes - b.startMinutes);
+
+    const groups: Array<{ key: ResultGroup; sessions: Session[] }> = [
+      { key: "startingSoon", sessions: byStartTime(resultsFiltered.filter((s) => s.day === "today" && s.urgent)) },
+      { key: "today", sessions: byStartTime(resultsFiltered.filter((s) => s.day === "today" && !s.urgent)) },
+    ];
+    if (timeWindow === "week") {
+      groups.push({ key: "tomorrow", sessions: byStartTime(resultsFiltered.filter((s) => s.day === "tomorrow")) });
+    }
+    return groups.filter((g) => g.sessions.length > 0);
   }, [resultsFiltered, timeWindow]);
 
   const isUnavailableMunicipality = effectiveLocation?.type === "municipality" && effectiveLocation.status === "not-yet-available";
@@ -303,7 +367,7 @@ export default function SearchSurface() {
           <div className="flex items-center gap-3">
             {/* Current Search Area — display only. It reflects wherever the
                 search just resolved to; it is never typed into directly. */}
-            <span className="flex items-center gap-1 text-sm text-gray-500">
+            <span className="flex items-center gap-1 text-sm text-gray-600">
               <LocationIcon className="h-4 w-4 text-gray-400" />
               {effectiveLocation ? effectiveLocation.label : "Near you"}
             </span>
@@ -311,7 +375,7 @@ export default function SearchSurface() {
               type="button"
               aria-label="About DropIn"
               onClick={() => setInfoSheetOpen(true)}
-              className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info"
             >
               <InfoIcon className="h-5 w-5" />
             </button>
@@ -342,7 +406,7 @@ export default function SearchSurface() {
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleSearchKeyDown}
               placeholder="Search activities, community centres or places"
-              className={`w-full rounded-2xl border border-gray-200 bg-white text-gray-900 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_2px_8px_rgba(16,24,40,0.04)] outline-none transition-all duration-200 placeholder:text-gray-500 hover:border-gray-300 focus:border-accent focus:shadow-none focus:ring-4 focus:ring-accent/10 ${
+              className={`w-full rounded-2xl border border-gray-200 bg-white text-gray-900 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_2px_8px_rgba(16,24,40,0.04)] outline-none transition-all duration-200 placeholder:text-gray-500 hover:border-gray-300 focus:border-info focus:shadow-none focus:ring-4 focus:ring-info/10 ${
                 large ? "py-[18px] pl-12 pr-4 text-base" : "py-2.5 pl-10 pr-4 text-sm"
               }`}
             />
@@ -355,7 +419,7 @@ export default function SearchSurface() {
                   <button
                     type="button"
                     onClick={() => commitQuery(s)}
-                    className="block w-full px-4 py-2.5 text-left text-sm text-gray-700 transition-colors duration-100 hover:bg-accent-soft hover:text-accent"
+                    className="block w-full px-4 py-2.5 text-left text-sm text-gray-700 transition-colors duration-100 hover:bg-info-soft hover:text-info"
                   >
                     {s}
                   </button>
@@ -384,9 +448,9 @@ export default function SearchSurface() {
                     key={chip}
                     type="button"
                     onClick={() => commitQuery(chip)}
-                    className="group flex flex-shrink-0 items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 transition-colors duration-150 hover:border-accent/50 hover:bg-accent-soft hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                    className="group flex flex-shrink-0 items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 transition-colors duration-150 hover:border-info/40 hover:bg-info-soft/40 hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2"
                   >
-                    <Icon className="h-4 w-4 text-gray-400 transition-colors duration-150 group-hover:text-accent" />
+                    <Icon className="h-4 w-4 text-gray-400 transition-colors duration-150 group-hover:text-info" />
                     {chip}
                   </button>
                 );
@@ -396,17 +460,17 @@ export default function SearchSurface() {
                 type="button"
                 aria-pressed={discoveryFreeOnly}
                 onClick={() => setDiscoveryFreeOnly((v) => !v)}
-                className={`flex-shrink-0 rounded-full border px-3.5 py-2 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${
+                className={`flex-shrink-0 rounded-full border px-3.5 py-2 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2 ${
                   discoveryFreeOnly
-                    ? "border-accent bg-accent font-semibold text-white"
-                    : "border-gray-200 bg-white font-medium text-gray-600 hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
+                    ? "border-info bg-info font-semibold text-white"
+                    : "border-gray-200 bg-white font-medium text-gray-600 hover:border-info/40 hover:bg-info-soft/40 hover:text-info"
                 }`}
               >
                 Free
               </button>
             </div>
 
-            <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-500">
+            <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-600">
               {persistentLocation ? `Happening in ${persistentLocation.label}` : "Happening near you"}
             </h2>
 
@@ -417,9 +481,9 @@ export default function SearchSurface() {
                 <SkeletonCard />
               </div>
             ) : discoveryHighlights.length === 0 ? (
-              <p className="rounded-2xl border border-dashed border-gray-200 py-8 text-center text-sm text-gray-500">
+              <p className="rounded-2xl border border-dashed border-gray-200 py-8 text-center text-sm text-gray-600">
                 Nothing free right now nearby.{" "}
-                <button type="button" onClick={() => setDiscoveryFreeOnly(false)} className="text-accent underline underline-offset-2">
+                <button type="button" onClick={() => setDiscoveryFreeOnly(false)} className="text-info underline underline-offset-2">
                   Show everything
                 </button>
               </p>
@@ -446,10 +510,10 @@ export default function SearchSurface() {
                     type="button"
                     aria-pressed={active}
                     onClick={() => setActiveFilter(f)}
-                    className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${
+                    className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2 ${
                       active
-                        ? "border-accent bg-accent font-semibold text-white"
-                        : "border-gray-200 bg-white font-medium text-gray-600 hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
+                        ? "border-info bg-info font-semibold text-white"
+                        : "border-gray-200 bg-white font-medium text-gray-600 hover:border-info/40 hover:bg-info-soft/40 hover:text-info"
                     }`}
                   >
                     {f}
@@ -458,11 +522,11 @@ export default function SearchSurface() {
               })}
             </div>
 
-            <div className="mb-4 flex items-center gap-1.5 text-sm text-gray-500">
+            <div className="mb-4 flex items-center gap-1.5 text-sm text-gray-600">
               <button
                 type="button"
                 onClick={() => setTimeWindow("today")}
-                className={timeWindow === "today" ? "font-semibold text-accent underline underline-offset-2" : "hover:text-accent"}
+                className={timeWindow === "today" ? "font-semibold text-info underline underline-offset-2" : "hover:text-info"}
               >
                 Today
               </button>
@@ -470,20 +534,44 @@ export default function SearchSurface() {
               <button
                 type="button"
                 onClick={() => setTimeWindow("week")}
-                className={timeWindow === "week" ? "font-semibold text-accent underline underline-offset-2" : "hover:text-accent"}
+                className={timeWindow === "week" ? "font-semibold text-info underline underline-offset-2" : "hover:text-info"}
               >
                 This Week
               </button>
             </div>
 
-            <div className="border-t border-gray-200/70 py-4 text-xs text-gray-500">
-              {`${resultsFiltered.length} ${resultsFiltered.length === 1 ? "activity" : "activities"} · Last updated 3 hours ago`}
+            <div className="flex items-center justify-between border-t border-gray-200/70 py-4 text-xs text-gray-600">
+              <span>{`${resultsFiltered.length} ${resultsFiltered.length === 1 ? "activity" : "activities"} · Last updated 3 hours ago`}</span>
+              <div className="flex flex-shrink-0 items-center gap-1" role="group" aria-label="List density">
+                <button
+                  type="button"
+                  aria-label="Comfortable list"
+                  aria-pressed={density === "comfortable"}
+                  onClick={() => setDensityPersisted("comfortable")}
+                  className={`rounded-md p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info ${
+                    density === "comfortable" ? "bg-info text-white" : "text-gray-400 hover:bg-info-soft/40 hover:text-info"
+                  }`}
+                >
+                  <ComfortableListIcon className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Compact list"
+                  aria-pressed={density === "compact"}
+                  onClick={() => setDensityPersisted("compact")}
+                  className={`rounded-md p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info ${
+                    density === "compact" ? "bg-info text-white" : "text-gray-400 hover:bg-info-soft/40 hover:text-info"
+                  }`}
+                >
+                  <CompactListIcon className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             <div className="space-y-8">
               {resultsFiltered.length === 0 ? (
                 <div className="py-12 text-center">
-                  <p className="text-sm text-gray-500">{emptyStateMessage}</p>
+                  <p className="text-sm text-gray-600">{emptyStateMessage}</p>
                   <p className="mt-3 text-xs font-medium uppercase tracking-wide text-gray-400">Try</p>
                   <div className="mt-2 flex flex-wrap justify-center gap-2">
                     {isUnavailableMunicipality ? (
@@ -493,7 +581,7 @@ export default function SearchSurface() {
                           setLocationOverride(undefined);
                           setPersistentLocation(undefined);
                         }}
-                        className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
+                        className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-info/40 hover:bg-info-soft/40 hover:text-info"
                       >
                         Show Toronto instead
                       </button>
@@ -503,7 +591,7 @@ export default function SearchSurface() {
                           <button
                             type="button"
                             onClick={() => setTimeWindow("week")}
-                            className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
+                            className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-info/40 hover:bg-info-soft/40 hover:text-info"
                           >
                             This Week
                           </button>
@@ -515,7 +603,7 @@ export default function SearchSurface() {
                               setLocationOverride(undefined);
                               setPersistentLocation(undefined);
                             }}
-                            className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
+                            className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-info/40 hover:bg-info-soft/40 hover:text-info"
                           >
                             Nearby areas
                           </button>
@@ -525,7 +613,7 @@ export default function SearchSurface() {
                             key={a}
                             type="button"
                             onClick={() => commitQuery(a)}
-                            className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
+                            className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-info/40 hover:bg-info-soft/40 hover:text-info"
                           >
                             {a}
                           </button>
@@ -537,12 +625,12 @@ export default function SearchSurface() {
               ) : (
                 resultsByDay.map((d) => (
                   <div key={d.key}>
-                    <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-500">
-                      {DAY_LABELS[d.key]}
+                    <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-600">
+                      {RESULT_GROUP_LABELS[d.key]}
                     </h2>
                     <div className="space-y-4">
                       {d.sessions.map((s) => (
-                        <SessionCard key={s.id} s={s} onSelect={setSelectedSession} />
+                        <SessionCard key={s.id} s={s} onSelect={setSelectedSession} density={density} />
                       ))}
                     </div>
                   </div>
@@ -587,7 +675,7 @@ export default function SearchSurface() {
               ref={directionsRef}
               href="#"
               onClick={(e) => e.preventDefault()}
-              className="mt-5 grid w-full grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+              className="mt-5 grid w-full grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl bg-action px-4 py-3 text-sm font-semibold text-action-text transition-colors hover:bg-action/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2"
             >
               <DirectionsIcon className="h-5 w-5" />
               <span className="text-center">Directions</span>
@@ -603,7 +691,7 @@ export default function SearchSurface() {
                 <a
                   href="#"
                   onClick={(e) => e.preventDefault()}
-                  className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                  className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 transition-colors hover:border-info/40 hover:bg-info-soft/40 hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2"
                 >
                   <LinkIcon className="h-5 w-5" />
                   <span className="text-center">Website</span>
@@ -614,7 +702,7 @@ export default function SearchSurface() {
                 <a
                   href="#"
                   onClick={(e) => e.preventDefault()}
-                  className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                  className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 transition-colors hover:border-info/40 hover:bg-info-soft/40 hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2"
                 >
                   <PhoneIcon className="h-5 w-5" />
                   <span className="text-center">Call</span>
@@ -623,7 +711,7 @@ export default function SearchSurface() {
               )}
               <button
                 type="button"
-                className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-accent px-4 py-3 text-sm font-semibold text-accent transition-colors hover:bg-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-info px-4 py-3 text-sm font-semibold text-info transition-colors hover:bg-info-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2"
               >
                 <ShareIcon className="h-5 w-5" />
                 <span className="text-center">Share</span>
@@ -656,20 +744,20 @@ export default function SearchSurface() {
           drop-in activities from official recreation providers — all in one place.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-accent">Why DropIn</h3>
+        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-info">Why DropIn</h3>
         <p className="mt-1 text-sm text-gray-600">
           Community recreation is one of the easiest ways to stay active — but finding what&rsquo;s
           actually on today usually means checking several different websites. DropIn brings it into
           one search.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-accent">Our Data</h3>
+        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-info">Our Data</h3>
         <p className="mt-1 text-sm text-gray-600">
           Schedules come directly from official recreation providers. Whenever possible, DropIn links
           straight to the official source to help keep information accurate.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-accent">What You&rsquo;ll Find</h3>
+        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-info">What You&rsquo;ll Find</h3>
         <ul className="mt-1 list-disc space-y-0.5 pl-4 text-sm text-gray-600">
           <li>Nearby activities, ranked by what&rsquo;s happening soonest</li>
           <li>Official schedules, not estimates</li>
@@ -677,14 +765,14 @@ export default function SearchSurface() {
           <li>Quick directions to get you there</li>
         </ul>
 
-        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-accent">Feedback</h3>
+        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-info">Feedback</h3>
         {feedbackStage === "idle" && (
           <p className="mt-1 text-sm text-gray-600">
             Found something that doesn&rsquo;t look right?{" "}
             <button
               type="button"
               onClick={() => setFeedbackStage("writing")}
-              className="text-accent underline underline-offset-2"
+              className="text-info underline underline-offset-2"
             >
               Let us know.
             </button>
@@ -703,7 +791,7 @@ export default function SearchSurface() {
               value={feedbackText}
               onChange={(e) => setFeedbackText(e.target.value)}
               placeholder="What looks wrong? A time, price, or address that's off..."
-              className="w-full resize-none rounded-lg border border-gray-200 p-2.5 text-sm text-gray-700 outline-none transition-colors placeholder:text-gray-400 focus:border-accent focus:ring-2 focus:ring-accent/40"
+              className="w-full resize-none rounded-lg border border-gray-200 p-2.5 text-sm text-gray-700 outline-none transition-colors placeholder:text-gray-400 focus:border-info focus:ring-2 focus:ring-info/40"
             />
             <div className="mt-2 flex justify-end gap-2">
               <button
@@ -720,7 +808,7 @@ export default function SearchSurface() {
                 type="button"
                 disabled={feedbackText.trim().length === 0}
                 onClick={() => setFeedbackStage("sent")}
-                className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-lg bg-action px-3 py-1.5 text-xs font-semibold text-action-text transition-colors hover:bg-action/90 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Send
               </button>
@@ -729,7 +817,7 @@ export default function SearchSurface() {
         )}
 
         {feedbackStage === "sent" && (
-          <p className="mt-1 rounded-lg border border-accent/25 bg-accent-soft px-3 py-2 text-sm text-accent">
+          <p className="mt-1 rounded-lg border border-status/25 bg-status/10 px-3 py-2 text-sm text-status">
             Thanks — we&rsquo;ve received your note and will take a look.
           </p>
         )}

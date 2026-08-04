@@ -17,6 +17,7 @@ export type Session = {
   day: Day;
   urgent: boolean;
   absoluteTime: string;
+  startMinutes: number;
   centre: string;
   municipality: string;
   district: string;

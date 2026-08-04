@@ -104,7 +104,7 @@ export function Sheet({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="ml-auto flex-shrink-0 rounded-full p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="ml-auto flex-shrink-0 rounded-full p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info"
           >
             <CloseIcon className="h-4 w-4" />
           </button>

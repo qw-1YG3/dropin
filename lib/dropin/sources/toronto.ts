@@ -93,6 +93,7 @@ export function getTorontoSessions(now: Date): Session[] {
       day,
       urgent: isUrgent(start, end, now),
       absoluteTime: formatAbsoluteTime(r["Start Hour"], r["Start Minute"], r["End Hour"], r["End Min"]),
+      startMinutes: r["Start Hour"] * 60 + r["Start Minute"],
       centre: location["Location Name"],
       municipality: "Toronto",
       district: location["District"],

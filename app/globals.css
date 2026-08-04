@@ -3,17 +3,34 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
-  --surface: #f7f8fa;
-  --accent: #0f766e;
-  --accent-soft: #e7f5f3;
+  --surface: #f5f7f8;
+
+  /* Semantic 3-hue system, replacing the single teal accent.
+     Info (blue) = navigation/interaction: search focus, active input,
+       links, hover states, selected chips/toggles. Never a large surface.
+     Status (green) = system state only: Happening Soon, Open, Verified.
+       Never a background or decorative panel.
+     Action (orange) = the rare, high-intent CTA: Directions, primary
+       submit. Never headings, cards, or body text.
+     Each has a "-soft"/"-text" pairing where the brief's suggested hex
+     failed AA at its intended use — see the accompanying explanation for
+     exact contrast ratios. */
+  --info-soft: #abd7fb; /* background fills only — 1.4:1 as text, fails AA */
+  --info: #1e6fbf; /* text/icons/borders/solid selected fills — 5.15:1 on white */
+  --status: #29816b; /* darkened ~6% from the suggested #2C8A72 (4.21:1 -> 4.72:1 on white) */
+  --action: #f98c53; /* exactly as suggested — kept vibrant by pairing with dark text instead of white */
+  --action-text: #1f2937; /* on-action-fill text colour — 6.22:1, vs. white's 2.36:1 on this orange */
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-surface: var(--surface);
-  --color-accent: var(--accent);
-  --color-accent-soft: var(--accent-soft);
+  --color-info-soft: var(--info-soft);
+  --color-info: var(--info);
+  --color-status: var(--status);
+  --color-action: var(--action);
+  --color-action-text: var(--action-text);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
