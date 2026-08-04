@@ -1,7 +1,12 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CloseIcon } from "./icons";
+
+// How long the reverse (closing) animation plays before the sheet actually
+// unmounts — inside the 150–220ms band, and short enough that it never
+// reads as a delay to whatever the user does next.
+const EXIT_DURATION_MS = 200;
 
 type SheetProps = {
   open: boolean;
@@ -63,6 +68,28 @@ export function Sheet({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const isModal = desktopVariant === "modal";
 
+  // Mirrors `open`, but lags behind on the close transition so the sheet
+  // stays mounted long enough to play its exit animation instead of
+  // vanishing the instant `open` goes false.
+  const [shouldRender, setShouldRender] = useState(open);
+  const [closing, setClosing] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setShouldRender(true);
+      setClosing(false);
+      return;
+    }
+    if (!shouldRender) return;
+    setClosing(true);
+    const timer = setTimeout(() => {
+      setShouldRender(false);
+      setClosing(false);
+    }, EXIT_DURATION_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     (initialFocusRef?.current ?? closeButtonRef.current)?.focus();
@@ -74,7 +101,7 @@ export function Sheet({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!shouldRender) return null;
 
   return (
     <div className={`fixed inset-0 z-50 flex items-end justify-center ${isModal ? "md:items-center md:p-4" : ""}`}>
@@ -82,15 +109,22 @@ export function Sheet({
         type="button"
         aria-label="Close"
         onClick={onClose}
-        className="absolute inset-0 bg-text-primary/30 motion-safe:animate-[fadeIn_150ms_ease-out]"
+        tabIndex={closing ? -1 : undefined}
+        className={`absolute inset-0 bg-text-primary/30 ${closing ? "pointer-events-none motion-safe:animate-[fadeOut_150ms_ease-out]" : "motion-safe:animate-[fadeIn_150ms_ease-out]"}`}
       />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`relative w-full max-w-2xl border border-border bg-white p-5 shadow-[0_16px_40px_-8px_rgba(47,43,39,0.20)] motion-safe:animate-[slideUp_240ms_cubic-bezier(0.16,1,0.3,1)] ${
+        className={`relative w-full max-w-2xl border border-border bg-white p-5 shadow-[0_16px_40px_-8px_rgba(47,43,39,0.20)] ${
+          closing
+            ? "pointer-events-none motion-safe:animate-[slideDown_200ms_cubic-bezier(0.16,1,0.3,1)]"
+            : "motion-safe:animate-[slideUp_240ms_cubic-bezier(0.16,1,0.3,1)]"
+        } ${
           isModal
-            ? `rounded-t-2xl border-b-0 ${narrow ? "md:max-w-sm" : "md:max-w-md"} md:rounded-2xl md:border-b md:motion-safe:animate-[scaleIn_220ms_cubic-bezier(0.16,1,0.3,1)]`
+            ? `rounded-t-2xl border-b-0 ${narrow ? "md:max-w-sm" : "md:max-w-md"} md:rounded-2xl md:border-b ${
+                closing ? "md:motion-safe:animate-[scaleOut_200ms_cubic-bezier(0.16,1,0.3,1)]" : "md:motion-safe:animate-[scaleIn_220ms_cubic-bezier(0.16,1,0.3,1)]"
+              }`
             : "rounded-t-2xl border-b-0"
         }`}
       >
@@ -104,7 +138,7 @@ export function Sheet({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="ml-auto flex-shrink-0 rounded-full p-1.5 text-text-secondary transition-colors duration-150 hover:bg-hover-surface hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-95"
+            className="ml-auto flex-shrink-0 rounded-full p-1.5 text-text-secondary transition-all duration-150 ease-out hover:bg-hover-surface hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-95"
           >
             <CloseIcon className="h-4 w-4" />
           </button>

@@ -227,6 +227,73 @@ export default function SearchSurface() {
     return () => clearTimeout(timer);
   }, [effectiveLocation?.label]);
 
+  // Search suggestions — keeps rendering the last non-empty list for a beat
+  // after it empties out (query cleared, committed, or Escape pressed) so
+  // the dropdown can play a reverse of its own entrance instead of
+  // disappearing mid-frame.
+  const [displaySuggestions, setDisplaySuggestions] = useState<string[]>([]);
+  const [suggestionsClosing, setSuggestionsClosing] = useState(false);
+  useEffect(() => {
+    if (suggestions.length > 0) {
+      setDisplaySuggestions(suggestions);
+      setSuggestionsClosing(false);
+      return;
+    }
+    if (displaySuggestions.length === 0) return;
+    setSuggestionsClosing(true);
+    const timer = setTimeout(() => {
+      setDisplaySuggestions([]);
+      setSuggestionsClosing(false);
+    }, 150);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestions]);
+
+  // A quick, opacity-only pulse whenever density or the active filter/time
+  // window changes. The cards themselves swap instantly — same as before,
+  // their own data and keys are untouched — this only softens how that swap
+  // reads visually, so switching density or narrowing a filter feels like
+  // the same list settling rather than a fresh page. Alternates between two
+  // identically-defined keyframe names so the animation reliably restarts
+  // without remounting (and therefore without disturbing) the cards
+  // underneath.
+  const [resultsPulse, setResultsPulse] = useState<0 | 1>(0);
+  const isFirstResultsRender = useRef(true);
+  useEffect(() => {
+    if (isFirstResultsRender.current) {
+      isFirstResultsRender.current = false;
+      return;
+    }
+    setResultsPulse((v) => (v === 0 ? 1 : 0));
+  }, [density, activeFilter, timeWindow]);
+
+  const [discoveryPulse, setDiscoveryPulse] = useState<0 | 1>(0);
+  const isFirstDiscoveryRender = useRef(true);
+  useEffect(() => {
+    if (isFirstDiscoveryRender.current) {
+      isFirstDiscoveryRender.current = false;
+      return;
+    }
+    setDiscoveryPulse((v) => (v === 0 ? 1 : 0));
+  }, [discoveryFreeOnly]);
+
+  // Discovery <-> Results handoff — a short, fast fade-out of whatever's
+  // currently on screen, immediately followed by the incoming view's own
+  // entrance, so the switch reads as one continuous change of state rather
+  // than the old screen vanishing and an unrelated new one appearing.
+  const [displaySurfaceState, setDisplaySurfaceState] = useState(surfaceState);
+  const [surfaceExiting, setSurfaceExiting] = useState(false);
+  useEffect(() => {
+    if (surfaceState === displaySurfaceState) return;
+    setSurfaceExiting(true);
+    const timer = setTimeout(() => {
+      setDisplaySurfaceState(surfaceState);
+      setSurfaceExiting(false);
+    }, 100);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [surfaceState]);
+
   const discoveryHighlights = useMemo(() => {
     let pool = sessions.filter((s) => s.day === "today");
     if (persistentLocation) pool = pool.filter((s) => sessionMatchesLocation(s, persistentLocation));
@@ -465,7 +532,7 @@ export default function SearchSurface() {
                 search just resolved to; it is never typed into directly.
                 A brief warm pulse confirms it just changed. */}
             <span
-              className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 text-sm text-text-secondary transition-colors duration-500 ${
+              className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 text-sm text-text-secondary transition-colors duration-500 ease-out ${
                 pillPulsing ? "motion-safe:animate-[pillPulse_900ms_ease-out]" : ""
               }`}
             >
@@ -476,7 +543,7 @@ export default function SearchSurface() {
               type="button"
               aria-label="About DropIn"
               onClick={() => setInfoSheetOpen(true)}
-              className="rounded-full p-1 text-text-secondary transition-colors duration-150 hover:bg-hover-surface hover:text-sage-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-95"
+              className="rounded-full p-1 text-text-secondary transition-all duration-150 ease-out hover:bg-hover-surface hover:text-sage-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-95"
             >
               <InfoIcon className="h-5 w-5" />
             </button>
@@ -497,7 +564,7 @@ export default function SearchSurface() {
           </label>
           <div className="relative">
             <SearchIcon
-              className={`pointer-events-none absolute top-1/2 -translate-y-1/2 text-text-secondary transition-transform duration-200 ${large ? "left-4 h-5 w-5" : "left-3.5 h-4 w-4"}`}
+              className={`pointer-events-none absolute top-1/2 -translate-y-1/2 text-text-secondary transition-transform duration-200 ease-out ${large ? "left-4 h-5 w-5" : "left-3.5 h-4 w-4"}`}
             />
             <input
               ref={inputRef}
@@ -529,14 +596,18 @@ export default function SearchSurface() {
             )}
           </div>
 
-          {suggestions.length > 0 && (
-            <ul className="dropdown-enter absolute z-10 mt-2 w-full overflow-hidden rounded-xl border border-border bg-white shadow-[0_16px_40px_-8px_rgba(47,43,39,0.20)]">
-              {suggestions.map((s) => (
+          {displaySuggestions.length > 0 && (
+            <ul
+              className={`absolute z-10 mt-2 w-full overflow-hidden rounded-xl border border-border bg-white shadow-[0_16px_40px_-8px_rgba(47,43,39,0.20)] ${
+                suggestionsClosing ? "dropdown-exit pointer-events-none" : "dropdown-enter"
+              }`}
+            >
+              {displaySuggestions.map((s) => (
                 <li key={s}>
                   <button
                     type="button"
                     onClick={() => commitQuery(s)}
-                    className="block w-full px-4 py-2.5 text-left text-sm text-text-primary transition-colors duration-100 hover:bg-hover-surface hover:text-sage-text"
+                    className="block w-full px-4 py-2.5 text-left text-sm text-text-primary transition-colors duration-100 ease-out hover:bg-hover-surface hover:text-sage-text"
                   >
                     {s}
                   </button>
@@ -547,8 +618,10 @@ export default function SearchSurface() {
         </div>
 
         {/* ===================== DISCOVERY STATE ===================== */}
-        {surfaceState === "discovery" && (
-          <section className="pb-10 motion-safe:animate-[cardIn_250ms_ease-out_both]">
+        {displaySurfaceState === "discovery" && (
+          <section
+            className={`pb-10 ${surfaceExiting ? "motion-safe:animate-[fadeOut_100ms_ease-out]" : "motion-safe:animate-[cardIn_220ms_ease-out_both]"}`}
+          >
             {queryMiss && (
               <p className="mb-4 rounded-xl border border-border bg-hover-surface px-4 py-3 text-sm text-text-secondary">
                 We couldn&rsquo;t find &ldquo;{queryMiss}&rdquo; — here&rsquo;s what&rsquo;s on nearby instead.
@@ -570,7 +643,7 @@ export default function SearchSurface() {
                     onClick={() => commitQuery(chip)}
                     className="group flex flex-shrink-0 items-center gap-1.5 rounded-full border border-border bg-white px-3.5 py-2 text-sm font-medium text-text-primary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95"
                   >
-                    <Icon className="h-4 w-4 text-text-secondary transition-colors duration-150 group-hover:text-sage-text" />
+                    <Icon className="h-4 w-4 text-text-secondary transition-colors duration-150 ease-out group-hover:text-sage-text" />
                     {chip}
                   </button>
                 );
@@ -594,32 +667,36 @@ export default function SearchSurface() {
               {persistentLocation ? `Activities in ${persistentLocation.label}` : "Activities near you"}
             </h2>
 
-            {loading ? (
-              <div className="space-y-4">
-                <SkeletonCard />
-                <SkeletonCard />
-                <SkeletonCard />
-              </div>
-            ) : discoveryHighlights.length === 0 ? (
-              <p className="rounded-2xl border border-dashed border-border py-8 text-center text-sm text-text-secondary">
-                Nothing free right now — here&rsquo;s what&rsquo;s on nearby instead.{" "}
-                <button type="button" onClick={() => setDiscoveryFreeOnly(false)} className="text-sage-text underline underline-offset-2">
-                  Show everything
-                </button>
-              </p>
-            ) : (
-              <div className="space-y-4">
-                {discoveryHighlights.map((s, i) => (
-                  <SessionCard key={s.id} s={s} onSelect={setSelectedSession} delayMs={i * 30} />
-                ))}
-              </div>
-            )}
+            <div className={`motion-safe:animate-[${discoveryPulse === 0 ? "contentFadeA" : "contentFadeB"}_180ms_ease-out]`}>
+              {loading ? (
+                <div className="space-y-4">
+                  <SkeletonCard />
+                  <SkeletonCard />
+                  <SkeletonCard />
+                </div>
+              ) : discoveryHighlights.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-border py-8 text-center text-sm text-text-secondary">
+                  Nothing free right now — here&rsquo;s what&rsquo;s on nearby instead.{" "}
+                  <button type="button" onClick={() => setDiscoveryFreeOnly(false)} className="text-sage-text underline underline-offset-2">
+                    Show everything
+                  </button>
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {discoveryHighlights.map((s, i) => (
+                    <SessionCard key={s.id} s={s} onSelect={setSelectedSession} delayMs={i * 30} />
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
         )}
 
         {/* ===================== RESULTS STATE ===================== */}
-        {surfaceState === "results" && (
-          <section className="pb-10 motion-safe:animate-[cardIn_250ms_ease-out_both]">
+        {displaySurfaceState === "results" && (
+          <section
+            className={`pb-10 ${surfaceExiting ? "motion-safe:animate-[fadeOut_100ms_ease-out]" : "motion-safe:animate-[cardIn_220ms_ease-out_both]"}`}
+          >
             <p className="mb-2 text-sm text-text-secondary">
               {activityDisplayLabel ? `${activityDisplayLabel} activities` : `Activities in ${effectiveLocation?.label ?? committedQuery}`}
             </p>
@@ -648,7 +725,7 @@ export default function SearchSurface() {
               <button
                 type="button"
                 onClick={() => setTimeWindow("today")}
-                className={`transition-colors duration-150 ${timeWindow === "today" ? "font-semibold text-sage-text underline underline-offset-2" : "hover:text-sage-text"}`}
+                className={`transition-colors duration-150 ease-out ${timeWindow === "today" ? "font-semibold text-sage-text underline underline-offset-2" : "hover:text-sage-text"}`}
               >
                 Today
               </button>
@@ -656,7 +733,7 @@ export default function SearchSurface() {
               <button
                 type="button"
                 onClick={() => setTimeWindow("week")}
-                className={`transition-colors duration-150 ${timeWindow === "week" ? "font-semibold text-sage-text underline underline-offset-2" : "hover:text-sage-text"}`}
+                className={`transition-colors duration-150 ease-out ${timeWindow === "week" ? "font-semibold text-sage-text underline underline-offset-2" : "hover:text-sage-text"}`}
               >
                 This Week
               </button>
@@ -674,7 +751,7 @@ export default function SearchSurface() {
                     density === "comfortable" ? "bg-sage/15 text-sage-text" : "text-text-secondary hover:bg-hover-surface hover:text-sage-text"
                   }`}
                 >
-                  <ComfortableListIcon className={`h-4 w-4 transition-transform duration-200 ${density === "comfortable" ? "scale-100" : "scale-90"}`} />
+                  <ComfortableListIcon className={`h-4 w-4 transition-transform duration-200 ease-out ${density === "comfortable" ? "scale-100" : "scale-90"}`} />
                 </button>
                 <button
                   type="button"
@@ -685,12 +762,12 @@ export default function SearchSurface() {
                     density === "compact" ? "bg-sage/15 text-sage-text" : "text-text-secondary hover:bg-hover-surface hover:text-sage-text"
                   }`}
                 >
-                  <CompactListIcon className={`h-4 w-4 transition-transform duration-200 ${density === "compact" ? "scale-100" : "scale-90"}`} />
+                  <CompactListIcon className={`h-4 w-4 transition-transform duration-200 ease-out ${density === "compact" ? "scale-100" : "scale-90"}`} />
                 </button>
               </div>
             </div>
 
-            <div className="space-y-8">
+            <div className={`space-y-8 motion-safe:animate-[${resultsPulse === 0 ? "contentFadeA" : "contentFadeB"}_180ms_ease-out]`}>
               {loading ? (
                 <div className="space-y-4">
                   <SkeletonCard />
@@ -698,7 +775,7 @@ export default function SearchSurface() {
                   <SkeletonCard />
                 </div>
               ) : resultsFiltered.length === 0 ? (
-                <div className="py-12 text-center motion-safe:animate-[cardIn_250ms_ease-out_both]">
+                <div className="py-12 text-center motion-safe:animate-[cardIn_220ms_ease-out_both]">
                   <p className="text-sm text-text-secondary">{emptyStateMessage}</p>
                   <p className="mt-3 text-xs font-medium text-text-secondary/70">Try</p>
                   <div className="mt-2 flex flex-wrap justify-center gap-2">
@@ -926,7 +1003,7 @@ export default function SearchSurface() {
                   setFeedbackStage("idle");
                   setFeedbackText("");
                 }}
-                className="rounded-lg px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-150 hover:bg-hover-surface hover:text-text-primary active:scale-95"
+                className="rounded-lg px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-150 ease-out hover:bg-hover-surface hover:text-text-primary active:scale-95"
               >
                 Cancel
               </button>
@@ -943,7 +1020,7 @@ export default function SearchSurface() {
         )}
 
         {feedbackStage === "sent" && (
-          <p className="mt-1 rounded-lg border border-sage-text/25 bg-sage/15 px-3 py-2 text-sm text-sage-text motion-safe:animate-[cardIn_200ms_ease-out_both]">
+          <p className="mt-1 rounded-lg border border-sage-text/25 bg-sage/15 px-3 py-2 text-sm text-sage-text motion-safe:animate-[cardIn_220ms_ease-out_both]">
             Thanks — we&rsquo;ve received your note and will take a look.
           </p>
         )}

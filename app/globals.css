@@ -88,8 +88,23 @@ body {
     }
   }
 
+  @keyframes fade-slide-out {
+    from {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+
   .dropdown-enter {
     animation: fade-slide-in 150ms ease-out;
+  }
+
+  .dropdown-exit {
+    animation: fade-slide-out 150ms ease-out;
   }
 }
 
@@ -104,6 +119,18 @@ body {
   }
 }
 
+/* Reverse of fadeIn — reused for the Sheet scrim's exit and for the short
+   Discovery/Results handoff dip, so every plain opacity-only exit in the
+   product shares one keyframe. */
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 @keyframes slideUp {
   from {
     transform: translateY(16px);
@@ -115,6 +142,18 @@ body {
   }
 }
 
+/* Reverse of slideUp — the mobile bottom sheet's own dismissal. */
+@keyframes slideDown {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+}
+
 @keyframes scaleIn {
   from {
     transform: scale(0.98);
@@ -123,6 +162,18 @@ body {
   to {
     transform: scale(1);
     opacity: 1;
+  }
+}
+
+/* Reverse of scaleIn — the desktop centered modal's own dismissal. */
+@keyframes scaleOut {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(0.98);
+    opacity: 0;
   }
 }
 
@@ -146,6 +197,33 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* Density-toggle / filter-refinement content swap — a plain opacity-only
+   fade, deliberately without cardIn's rise, so switching density or
+   narrowing a filter reads as the same list settling rather than a fresh
+   list arriving. Defined twice, identically, so the call site can alternate
+   between the two names each time the underlying content changes — CSS only
+   restarts an animation when its declared name actually changes, and this
+   container's children keep their own identity/keys across the swap (see
+   the pulseVariant state in page.tsx), so a same-named class re-application
+   would not replay. */
+@keyframes contentFadeA {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes contentFadeB {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 
