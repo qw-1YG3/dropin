@@ -82,20 +82,20 @@ export function Sheet({
         type="button"
         aria-label="Close"
         onClick={onClose}
-        className="absolute inset-0 bg-gray-900/30 motion-safe:animate-[fadeIn_150ms_ease-out]"
+        className="absolute inset-0 bg-text-primary/30 motion-safe:animate-[fadeIn_150ms_ease-out]"
       />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`relative w-full max-w-2xl border border-gray-200 bg-white p-5 shadow-lg motion-safe:animate-[slideUp_200ms_ease-out] ${
+        className={`relative w-full max-w-2xl border border-border bg-white p-5 shadow-[0_16px_40px_-8px_rgba(47,43,39,0.20)] motion-safe:animate-[slideUp_240ms_cubic-bezier(0.16,1,0.3,1)] ${
           isModal
-            ? `rounded-t-2xl border-b-0 ${narrow ? "md:max-w-sm" : "md:max-w-md"} md:rounded-2xl md:border-b md:motion-safe:animate-[scaleIn_200ms_ease-out]`
+            ? `rounded-t-2xl border-b-0 ${narrow ? "md:max-w-sm" : "md:max-w-md"} md:rounded-2xl md:border-b md:motion-safe:animate-[scaleIn_220ms_cubic-bezier(0.16,1,0.3,1)]`
             : "rounded-t-2xl border-b-0"
         }`}
       >
         <div className={`mb-2 flex justify-center ${isModal ? "md:hidden" : ""}`}>
-          <div className="h-1 w-10 rounded-full bg-gray-200" aria-hidden="true" />
+          <div className="h-1 w-10 rounded-full bg-border" aria-hidden="true" />
         </div>
         <div className="mb-3 flex items-center justify-between gap-3">
           {titleSlot}
@@ -104,7 +104,7 @@ export function Sheet({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="ml-auto flex-shrink-0 rounded-full p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info"
+            className="ml-auto flex-shrink-0 rounded-full p-1.5 text-text-secondary transition-colors duration-150 hover:bg-hover-surface hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-95"
           >
             <CloseIcon className="h-4 w-4" />
           </button>

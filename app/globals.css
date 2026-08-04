@@ -3,34 +3,62 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
-  --surface: #f5f7f8;
 
-  /* Semantic 3-hue system, replacing the single teal accent.
-     Info (blue) = navigation/interaction: search focus, active input,
-       links, hover states, selected chips/toggles. Never a large surface.
-     Status (green) = system state only: Happening Soon, Open, Verified.
-       Never a background or decorative panel.
-     Action (orange) = the rare, high-intent CTA: Directions, primary
-       submit. Never headings, cards, or body text.
-     Each has a "-soft"/"-text" pairing where the brief's suggested hex
-     failed AA at its intended use — see the accompanying explanation for
-     exact contrast ratios. */
-  --info-soft: #abd7fb; /* background fills only — 1.4:1 as text, fails AA */
-  --info: #1e6fbf; /* text/icons/borders/solid selected fills — 5.15:1 on white */
-  --status: #29816b; /* darkened ~6% from the suggested #2C8A72 (4.21:1 -> 4.72:1 on white) */
-  --action: #f98c53; /* exactly as suggested — kept vibrant by pairing with dark text instead of white */
-  --action-text: #1f2937; /* on-action-fill text colour — 6.22:1, vs. white's 2.36:1 on this orange */
+  /* Cooler, mostly-neutral palette — green is back to being the one
+     interactive/brand colour (search focus, hover, chips, selected state),
+     terracotta narrowed to strictly the primary CTA (<5% of the interface:
+     Directions, primary submit). Warm cream panel tones from the previous
+     round are retired — they read as "warm-heavy" against this cooler
+     background, which is the specific thing this round asked to move away
+     from.
+     Two adjustments the new background required, re-verified rather than
+     assumed:
+     - Sage-text #647C5F on the new #F6F7F5 background: 4.26:1 (fails,
+       barely — the previous background was slightly darker, which had been
+       carrying it). Darkened ~5% to #5F755A (4.68:1) so it still reads
+       correctly wherever it sits directly on the page rather than on a
+       white card (e.g. the Today/This Week toggle, "Show everything").
+     - Terracotta #A06241 with white text remains 4.86:1 — unchanged, still
+       only used for the Directions/primary-submit fill. */
+  --surface: #f6f7f5; /* soft neutral, slightly warm relative to pure white */
+  --text-primary: #2f2b27;
+  --text-secondary: #726b63;
+  --border: #e3e6e1; /* cooled from the previous warm tan border */
+  --hover-surface: #eef1ec; /* cool, faintly green-tinted — doubles as the
+    "subtle green-tinted background" hover treatment chips/buttons use */
+  --sage: #7e9c77; /* fills/backgrounds — pair with text-primary, not white */
+  --sage-text: #5f755a; /* status text, focus state, active search, links —
+    the one interactive/brand colour across the product */
+  --terracotta: #a06241; /* the primary CTA only — Directions, primary submit.
+    Never search borders, hover borders, chips, or background panels. */
+  --terracotta-soft: #c97b52; /* reserved — not currently referenced in
+    app/page.tsx. Directions moved to brand green per follow-up feedback, so
+    terracotta's only remaining use is the feedback Send button. Kept defined
+    for the "notification badges (future)" case this round explicitly
+    flagged as not-yet-built. */
+
+  /* Legacy — the original single-teal accent, kept only so the untouched
+     /design preview pages (results-highfi, homepage-highfi, the earlier
+     colour-exploration fork) don't silently lose their colour now that the
+     production palette has moved on several times since they were built. */
+  --accent: #0f766e;
+  --accent-soft: #e7f5f3;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-surface: var(--surface);
-  --color-info-soft: var(--info-soft);
-  --color-info: var(--info);
-  --color-status: var(--status);
-  --color-action: var(--action);
-  --color-action-text: var(--action-text);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-border: var(--border);
+  --color-terracotta-soft: var(--terracotta-soft);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-hover-surface: var(--hover-surface);
+  --color-sage: var(--sage);
+  --color-sage-text: var(--sage-text);
+  --color-terracotta: var(--terracotta);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -89,7 +117,7 @@ body {
 
 @keyframes scaleIn {
   from {
-    transform: scale(0.96);
+    transform: scale(0.98);
     opacity: 0;
   }
   to {
@@ -105,5 +133,44 @@ body {
   }
   50% {
     opacity: 0.5;
+  }
+}
+
+/* Results list entrance — cross-fade + tiny rise, staggered per-card via an
+   inline animation-delay at the call site (20–40ms apart). */
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Location pill — a brief pulse the moment the effective location changes,
+   so "the context just updated" registers without an explicit label. */
+@keyframes pillPulse {
+  0% {
+    background-color: transparent;
+  }
+  30% {
+    background-color: var(--hover-surface);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* Rotating search placeholder — soft cross-fade between example queries. */
+@keyframes placeholderFade {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  10%,
+  90% {
+    opacity: 0;
   }
 }

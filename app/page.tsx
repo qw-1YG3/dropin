@@ -21,10 +21,27 @@ import type { Session } from "@/lib/dropin/types";
 
 const SUGGESTION_POOL = ["Badminton", "Pickleball", "Basketball", "Swimming", "Lane Swim", "Leisure Swim", "Yoga", "Open Gym", "Table Tennis"];
 
-type ResultGroup = "startingSoon" | "today" | "tomorrow";
+// Real, grounded examples only — every activity and district named here is
+// actually supported, so the rotation never implies a search that wouldn't
+// work. Static default first, so the first paint matches what screen
+// readers get from the real `placeholder` attribute underneath.
+const PLACEHOLDER_ROTATION = [
+  "Search activities, community centres or places",
+  "Search badminton",
+  "Search swimming near you",
+  "Search yoga in Scarborough",
+  "Search North York community centres",
+];
+
+// Today is split by real start time, not a fixed label — "later" means
+// after 5pm, a simple, statable threshold rather than an arbitrary feel.
+const LATER_TODAY_THRESHOLD_MINUTES = 17 * 60;
+
+type ResultGroup = "startingSoon" | "startingToday" | "laterToday" | "tomorrow";
 const RESULT_GROUP_LABELS: Record<ResultGroup, string> = {
-  startingSoon: "Starting Soon",
-  today: "Today",
+  startingSoon: "Starting soon",
+  startingToday: "Starting today",
+  laterToday: "Later today",
   tomorrow: "Tomorrow",
 };
 
@@ -48,22 +65,35 @@ type Density = "comfortable" | "compact";
 // component, same click target, same data — only the internal layout and
 // type scale shrink, per "reduce height significantly, preserve
 // readability, one-column scrolling" rather than a grid.
-function SessionCard({ s, onSelect, density = "comfortable" }: { s: Session; onSelect: (s: Session) => void; density?: Density }) {
+function SessionCard({
+  s,
+  onSelect,
+  density = "comfortable",
+  delayMs = 0,
+}: {
+  s: Session;
+  onSelect: (s: Session) => void;
+  density?: Density;
+  delayMs?: number;
+}) {
+  const enterStyle = { animationDelay: `${delayMs}ms` } as React.CSSProperties;
+
   if (density === "compact") {
     return (
       <button
         type="button"
         onClick={() => onSelect(s)}
-        className="w-full rounded-xl border border-gray-100 bg-white px-4 py-2.5 text-left transition-shadow duration-200 hover:shadow-md"
+        style={enterStyle}
+        className="w-full rounded-xl border border-border/70 bg-white px-4 py-2.5 text-left shadow-[0_1px_2px_rgba(47,43,39,0.04)] transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] active:scale-[0.99] motion-safe:animate-[cardIn_220ms_ease-out_both]"
       >
         <div className="flex items-center justify-between gap-3">
-          <p className="truncate text-[15px] font-bold leading-tight text-gray-900">{s.activity}</p>
-          {s.price && <span className="flex-shrink-0 text-xs text-gray-500">{s.price}</span>}
+          <p className="truncate text-[15px] font-bold leading-tight text-text-primary">{s.activity}</p>
+          {s.price && <span className="flex-shrink-0 text-xs text-text-secondary">{s.price}</span>}
         </div>
-        <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-gray-600">
-          {s.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-status" aria-hidden="true" />}
-          <span className={s.urgent ? "font-semibold text-status" : ""}>{timeLabel(s)}</span>
-          <span className="text-gray-300">·</span>
+        <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-text-secondary">
+          {s.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-sage-text" aria-hidden="true" />}
+          <span className={s.urgent ? "font-semibold text-sage-text" : ""}>{timeLabel(s)}</span>
+          ·
           <span className="truncate">{s.centre}</span>
         </p>
       </button>
@@ -74,25 +104,26 @@ function SessionCard({ s, onSelect, density = "comfortable" }: { s: Session; onS
     <button
       type="button"
       onClick={() => onSelect(s)}
-      className="w-full rounded-2xl border border-gray-100 bg-white p-5 text-left transition-shadow duration-200 hover:shadow-md"
+      style={enterStyle}
+      className="w-full rounded-2xl border border-border/70 bg-white p-5 text-left shadow-[0_1px_2px_rgba(47,43,39,0.04)] transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] active:scale-[0.99] motion-safe:animate-[cardIn_220ms_ease-out_both]"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-[18px] font-bold leading-tight text-gray-900">{s.activity}</p>
+          <p className="text-[18px] font-bold leading-tight text-text-primary">{s.activity}</p>
           <p
             className={`mt-0.5 flex items-center gap-1.5 text-sm ${
-              s.urgent ? "font-semibold text-status" : "font-medium text-gray-700"
+              s.urgent ? "font-semibold text-sage-text" : "font-medium text-text-secondary"
             }`}
           >
-            {s.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-status" aria-hidden="true" />}
+            {s.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-sage-text" aria-hidden="true" />}
             {timeLabel(s)}
           </p>
-          <p className="mt-4 text-sm text-gray-500">
+          <p className="mt-4 text-sm text-text-secondary">
             {s.centre}
             {s.distanceKm !== undefined && ` · ${s.distanceKm} km`}
           </p>
         </div>
-        {s.price && <span className="flex-shrink-0 text-sm text-gray-500">{s.price}</span>}
+        {s.price && <span className="flex-shrink-0 text-sm text-text-secondary">{s.price}</span>}
       </div>
     </button>
   );
@@ -101,12 +132,12 @@ function SessionCard({ s, onSelect, density = "comfortable" }: { s: Session; onS
 function SkeletonCard() {
   return (
     <div
-      className="rounded-2xl border border-gray-100 bg-white p-5 motion-safe:animate-[skeletonPulse_1.2s_ease-in-out_infinite]"
+      className="rounded-2xl border border-border/70 bg-white p-5 shadow-[0_1px_2px_rgba(47,43,39,0.04)] motion-safe:animate-[skeletonPulse_1.2s_ease-in-out_infinite]"
       aria-hidden="true"
     >
-      <div className="h-4 w-28 rounded bg-gray-200" />
-      <div className="mt-2.5 h-3.5 w-40 rounded bg-gray-100" />
-      <div className="mt-2.5 h-3 w-48 rounded bg-gray-100" />
+      <div className="h-4 w-28 rounded bg-border" />
+      <div className="mt-2.5 h-3.5 w-40 rounded bg-hover-surface" />
+      <div className="mt-2.5 h-3 w-48 rounded bg-hover-surface" />
     </div>
   );
 }
@@ -116,6 +147,7 @@ export default function SearchSurface() {
   const [query, setQuery] = useState("");
   const [committedQuery, setCommittedQuery] = useState("");
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
   const [activeFilter, setActiveFilter] = useState("All");
   const [timeWindow, setTimeWindow] = useState<"today" | "week">("today");
   const [discoveryFreeOnly, setDiscoveryFreeOnly] = useState(false);
@@ -135,6 +167,8 @@ export default function SearchSurface() {
   // Comfortable) — remembered across sessions since it's a stable reading
   // preference, not a per-search setting.
   const [density, setDensity] = useState<Density>("comfortable");
+  const [pillPulsing, setPillPulsing] = useState(false);
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const directionsRef = useRef<HTMLAnchorElement>(null);
 
@@ -162,6 +196,16 @@ export default function SearchSurface() {
     };
   }, []);
 
+  // Rotating placeholder — only cycles while the box is empty and unfocused,
+  // so it never competes with something the user is actually doing.
+  useEffect(() => {
+    if (query !== "" || inputFocused) return;
+    const timer = setInterval(() => {
+      setPlaceholderIndex((i) => (i + 1) % PLACEHOLDER_ROTATION.length);
+    }, 3200);
+    return () => clearInterval(timer);
+  }, [query, inputFocused]);
+
   const suggestions = useMemo(() => {
     if (!suggestionsOpen || query.trim().length === 0) return [];
     const q = query.trim().toLowerCase();
@@ -169,6 +213,19 @@ export default function SearchSurface() {
   }, [query, suggestionsOpen]);
 
   const effectiveLocation = locationOverride ?? persistentLocation;
+
+  // A brief pulse confirms "the context just updated" without a separate
+  // label — fires only on genuine changes, not on mount.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
+    setPillPulsing(true);
+    const timer = setTimeout(() => setPillPulsing(false), 900);
+    return () => clearTimeout(timer);
+  }, [effectiveLocation?.label]);
 
   const discoveryHighlights = useMemo(() => {
     let pool = sessions.filter((s) => s.day === "today");
@@ -227,20 +284,60 @@ export default function SearchSurface() {
     });
   }, [baseResults, activeFilter, timeWindow]);
 
-  // Urgent sessions surface in their own group ahead of the rest of Today,
-  // so the most time-sensitive activities need zero scanning effort to
-  // find. Sorted by start time within each group — real data (startMinutes,
-  // computed from the actual schedule). Distance would be the requested
-  // secondary sort key, but no session has one: Toronto Open Data has no
-  // coordinates and geolocation isn't built yet (Session.distanceKm is
-  // undefined for every real session), so sorting by it would mean sorting
-  // by nothing — left out rather than faked.
+  // A single, consistently-cased noun for whatever activity scope is
+  // currently active — used everywhere the Results state needs to name it
+  // in a sentence, instead of each spot independently reaching for the raw
+  // (possibly lowercase, possibly multi-word) query text. An active filter
+  // chip narrows the scope further, so it takes priority over the broader
+  // matched-activity set; a multi-activity match (e.g. "swim" resolving to
+  // several real course titles) collapses to its shortcut label ("Swimming")
+  // rather than every individual title.
+  const activityDisplayLabel = useMemo(() => {
+    if (activeFilter !== "All") return activeFilter;
+    if (matchedActivities.length === 1) return matchedActivities[0];
+    if (matchedActivities.length > 1) return getShortcutForActivity(matchedActivities[0]) ?? matchedActivities[0];
+    return undefined;
+  }, [activeFilter, matchedActivities]);
+
+  // The one real freshness signal the data layer provides — every session
+  // in the current snapshot shares the same lastUpdated date, so the first
+  // one is representative. Computed relative to "now" rather than a fixed
+  // string, so it stays true regardless of when the page is loaded.
+  const lastUpdatedLabel = useMemo(() => {
+    const raw = sessions[0]?.lastUpdated;
+    if (!raw) return undefined;
+    const updated = new Date(`${raw}T00:00:00`);
+    const days = Math.floor((Date.now() - updated.getTime()) / (1000 * 60 * 60 * 24));
+    if (days <= 0) return "Updated today";
+    if (days === 1) return "Updated yesterday";
+    return `Updated ${days} days ago`;
+  }, [sessions]);
+
+  // Priority: Starting Soon (urgent) > Starting Today (before 5pm) > Later
+  // Today (5pm+) > Tomorrow — so the most time-sensitive activities need
+  // zero scanning effort to find. Sorted by start time within each group —
+  // real data (startMinutes, computed from the actual schedule). Distance
+  // would be the requested secondary sort key, but no session has one:
+  // Toronto Open Data has no coordinates and geolocation isn't built yet
+  // (Session.distanceKm is undefined for every real session), so sorting by
+  // it would mean sorting by nothing — left out rather than faked. A fifth
+  // "Remaining Week" group isn't included for the same reason flagged last
+  // sprint: Session.day only ever distinguishes today/tomorrow, so there's
+  // no real "day 3-7" bucket to group by without fabricating one.
   const resultsByDay = useMemo(() => {
     const byStartTime = (list: Session[]) => [...list].sort((a, b) => a.startMinutes - b.startMinutes);
+    const today = resultsFiltered.filter((s) => s.day === "today");
 
     const groups: Array<{ key: ResultGroup; sessions: Session[] }> = [
-      { key: "startingSoon", sessions: byStartTime(resultsFiltered.filter((s) => s.day === "today" && s.urgent)) },
-      { key: "today", sessions: byStartTime(resultsFiltered.filter((s) => s.day === "today" && !s.urgent)) },
+      { key: "startingSoon", sessions: byStartTime(today.filter((s) => s.urgent)) },
+      {
+        key: "startingToday",
+        sessions: byStartTime(today.filter((s) => !s.urgent && s.startMinutes < LATER_TODAY_THRESHOLD_MINUTES)),
+      },
+      {
+        key: "laterToday",
+        sessions: byStartTime(today.filter((s) => !s.urgent && s.startMinutes >= LATER_TODAY_THRESHOLD_MINUTES)),
+      },
     ];
     if (timeWindow === "week") {
       groups.push({ key: "tomorrow", sessions: byStartTime(resultsFiltered.filter((s) => s.day === "tomorrow")) });
@@ -259,13 +356,12 @@ export default function SearchSurface() {
     if (effectiveLocation?.type === "municipality" && effectiveLocation.status === "not-yet-available") {
       return `DropIn doesn't cover ${effectiveLocation.label} yet — here's what's available in Toronto instead.`;
     }
-    const activityLabel =
-      matchedActivities.length === 1 ? matchedActivities[0] : matchedActivities.length > 1 ? committedQuery : "activities";
+    const activityPart = activityDisplayLabel ? `${activityDisplayLabel} activities` : "activities";
     const scope = timeWindow === "week" ? "this week" : "today";
     return effectiveLocation
-      ? `No ${activityLabel} sessions found in ${effectiveLocation.label} ${scope}.`
-      : `No ${activityLabel} sessions found ${scope}.`;
-  }, [matchedActivities, committedQuery, effectiveLocation, timeWindow]);
+      ? `No ${activityPart} found in ${effectiveLocation.label} ${scope}.`
+      : `No ${activityPart} found ${scope}.`;
+  }, [activityDisplayLabel, effectiveLocation, timeWindow]);
 
   // Only ever suggests activities that actually have real sessions in the
   // current location/time scope — never a dead-end suggestion.
@@ -359,23 +455,28 @@ export default function SearchSurface() {
   );
 
   return (
-    <main className="min-h-screen bg-surface text-gray-900">
+    <main className="min-h-screen bg-surface text-text-primary">
       {/* Persistent header — present across every state */}
       <div className="mx-auto max-w-2xl px-4 sm:px-6">
         <header className="flex items-center justify-between py-4">
-          <span className="text-lg font-semibold tracking-tight text-gray-900">DropIn</span>
+          <h1 className="text-lg font-semibold tracking-tight text-text-primary">DropIn</h1>
           <div className="flex items-center gap-3">
             {/* Current Search Area — display only. It reflects wherever the
-                search just resolved to; it is never typed into directly. */}
-            <span className="flex items-center gap-1 text-sm text-gray-600">
-              <LocationIcon className="h-4 w-4 text-gray-400" />
+                search just resolved to; it is never typed into directly.
+                A brief warm pulse confirms it just changed. */}
+            <span
+              className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 text-sm text-text-secondary transition-colors duration-500 ${
+                pillPulsing ? "motion-safe:animate-[pillPulse_900ms_ease-out]" : ""
+              }`}
+            >
+              <LocationIcon className="h-4 w-4 text-text-secondary" />
               {effectiveLocation ? effectiveLocation.label : "Near you"}
             </span>
             <button
               type="button"
               aria-label="About DropIn"
               onClick={() => setInfoSheetOpen(true)}
-              className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info"
+              className="rounded-full p-1 text-text-secondary transition-colors duration-150 hover:bg-hover-surface hover:text-sage-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-95"
             >
               <InfoIcon className="h-5 w-5" />
             </button>
@@ -385,7 +486,7 @@ export default function SearchSurface() {
         {/* Today's context — a quiet time anchor, not a heading. Confirms
             "these results are current" without competing with the wordmark
             above or the search bar below. */}
-        <p className="text-base font-medium text-gray-600">Today · {todayLabel}</p>
+        <p className="text-base font-medium text-text-secondary">Today · {todayLabel}</p>
 
         {/* Search — persists across every state, changing prominence rather
             than disappearing. No headline above it: Discovery already shows
@@ -396,7 +497,7 @@ export default function SearchSurface() {
           </label>
           <div className="relative">
             <SearchIcon
-              className={`pointer-events-none absolute top-1/2 -translate-y-1/2 text-gray-500 ${large ? "left-4 h-5 w-5" : "left-3.5 h-4 w-4"}`}
+              className={`pointer-events-none absolute top-1/2 -translate-y-1/2 text-text-secondary transition-transform duration-200 ${large ? "left-4 h-5 w-5" : "left-3.5 h-4 w-4"}`}
             />
             <input
               ref={inputRef}
@@ -405,21 +506,37 @@ export default function SearchSurface() {
               value={query}
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleSearchKeyDown}
-              placeholder="Search activities, community centres or places"
-              className={`w-full rounded-2xl border border-gray-200 bg-white text-gray-900 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_2px_8px_rgba(16,24,40,0.04)] outline-none transition-all duration-200 placeholder:text-gray-500 hover:border-gray-300 focus:border-info focus:shadow-none focus:ring-4 focus:ring-info/10 ${
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
+              placeholder={query === "" && !inputFocused ? "" : "Search activities, community centres or places"}
+              className={`w-full rounded-2xl border border-border bg-white text-text-primary shadow-[0_1px_2px_rgba(47,43,39,0.04),0_2px_8px_rgba(47,43,39,0.04)] outline-none transition-all duration-200 ease-out placeholder:text-text-secondary hover:border-text-secondary/30 focus:border-sage-text focus:shadow-none focus:ring-4 focus:ring-sage-text/20 ${
                 large ? "py-[18px] pl-12 pr-4 text-base" : "py-2.5 pl-10 pr-4 text-sm"
               }`}
             />
+            {/* Decorative rotating examples — purely visual, layered over the
+                real (static, accessible) placeholder above; clicks pass
+                through since this never intercepts pointer events. */}
+            {query === "" && !inputFocused && (
+              <span
+                key={placeholderIndex}
+                aria-hidden="true"
+                className={`pointer-events-none absolute top-1/2 -translate-y-1/2 truncate text-text-secondary motion-safe:animate-[placeholderFade_3.2s_ease-in-out] ${
+                  large ? "left-12 right-4 text-base" : "left-10 right-4 text-sm"
+                }`}
+              >
+                {PLACEHOLDER_ROTATION[placeholderIndex]}
+              </span>
+            )}
           </div>
 
           {suggestions.length > 0 && (
-            <ul className="dropdown-enter absolute z-10 mt-2 w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
+            <ul className="dropdown-enter absolute z-10 mt-2 w-full overflow-hidden rounded-xl border border-border bg-white shadow-[0_16px_40px_-8px_rgba(47,43,39,0.20)]">
               {suggestions.map((s) => (
                 <li key={s}>
                   <button
                     type="button"
                     onClick={() => commitQuery(s)}
-                    className="block w-full px-4 py-2.5 text-left text-sm text-gray-700 transition-colors duration-100 hover:bg-info-soft hover:text-info"
+                    className="block w-full px-4 py-2.5 text-left text-sm text-text-primary transition-colors duration-100 hover:bg-hover-surface hover:text-sage-text"
                   >
                     {s}
                   </button>
@@ -431,16 +548,19 @@ export default function SearchSurface() {
 
         {/* ===================== DISCOVERY STATE ===================== */}
         {surfaceState === "discovery" && (
-          <section className="pb-10">
+          <section className="pb-10 motion-safe:animate-[cardIn_250ms_ease-out_both]">
             {queryMiss && (
-              <p className="mb-4 rounded-xl bg-gray-100 px-4 py-3 text-sm text-gray-600">
+              <p className="mb-4 rounded-xl border border-border bg-hover-surface px-4 py-3 text-sm text-text-secondary">
                 We couldn&rsquo;t find &ldquo;{queryMiss}&rdquo; — here&rsquo;s what&rsquo;s on nearby instead.
               </p>
             )}
 
-            <p className="mb-4 text-sm font-medium text-gray-600">What would you like to do today?</p>
+            <p className="mb-4 text-sm font-medium text-text-secondary">What would you like to do today?</p>
 
-            <div className="mb-6 flex gap-2 overflow-x-auto pb-1">
+            {/* No wrapper — chips sit directly on the page background, left
+                edge lining up naturally with the search bar and heading
+                below since none of them add their own padding. */}
+            <div className="mb-6 flex items-center gap-2 overflow-x-auto">
               {SHORTCUTS.map((chip) => {
                 const Icon = ACTIVITY_ICONS[chip];
                 return (
@@ -448,30 +568,30 @@ export default function SearchSurface() {
                     key={chip}
                     type="button"
                     onClick={() => commitQuery(chip)}
-                    className="group flex flex-shrink-0 items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 transition-colors duration-150 hover:border-info/40 hover:bg-info-soft/40 hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2"
+                    className="group flex flex-shrink-0 items-center gap-1.5 rounded-full border border-border bg-white px-3.5 py-2 text-sm font-medium text-text-primary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95"
                   >
-                    <Icon className="h-4 w-4 text-gray-400 transition-colors duration-150 group-hover:text-info" />
+                    <Icon className="h-4 w-4 text-text-secondary transition-colors duration-150 group-hover:text-sage-text" />
                     {chip}
                   </button>
                 );
               })}
-              <span className="my-1 w-px flex-shrink-0 self-stretch bg-gray-200" aria-hidden="true" />
+              <span className="my-1 w-px flex-shrink-0 self-stretch bg-border" aria-hidden="true" />
               <button
                 type="button"
                 aria-pressed={discoveryFreeOnly}
                 onClick={() => setDiscoveryFreeOnly((v) => !v)}
-                className={`flex-shrink-0 rounded-full border px-3.5 py-2 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2 ${
+                className={`flex-shrink-0 rounded-full border px-3.5 py-2 text-sm transition-all duration-[170ms] ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95 ${
                   discoveryFreeOnly
-                    ? "border-info bg-info font-semibold text-white"
-                    : "border-gray-200 bg-white font-medium text-gray-600 hover:border-info/40 hover:bg-info-soft/40 hover:text-info"
+                    ? "border-transparent bg-sage/15 font-semibold text-sage-text"
+                    : "border-border bg-white font-medium text-text-secondary hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)]"
                 }`}
               >
                 Free
               </button>
             </div>
 
-            <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-600">
-              {persistentLocation ? `Happening in ${persistentLocation.label}` : "Happening near you"}
+            <h2 className="mb-3 text-base font-semibold text-sage-text">
+              {persistentLocation ? `Activities in ${persistentLocation.label}` : "Activities near you"}
             </h2>
 
             {loading ? (
@@ -481,16 +601,16 @@ export default function SearchSurface() {
                 <SkeletonCard />
               </div>
             ) : discoveryHighlights.length === 0 ? (
-              <p className="rounded-2xl border border-dashed border-gray-200 py-8 text-center text-sm text-gray-600">
-                Nothing free right now nearby.{" "}
-                <button type="button" onClick={() => setDiscoveryFreeOnly(false)} className="text-info underline underline-offset-2">
+              <p className="rounded-2xl border border-dashed border-border py-8 text-center text-sm text-text-secondary">
+                Nothing free right now — here&rsquo;s what&rsquo;s on nearby instead.{" "}
+                <button type="button" onClick={() => setDiscoveryFreeOnly(false)} className="text-sage-text underline underline-offset-2">
                   Show everything
                 </button>
               </p>
             ) : (
               <div className="space-y-4">
-                {discoveryHighlights.map((s) => (
-                  <SessionCard key={s.id} s={s} onSelect={setSelectedSession} />
+                {discoveryHighlights.map((s, i) => (
+                  <SessionCard key={s.id} s={s} onSelect={setSelectedSession} delayMs={i * 30} />
                 ))}
               </div>
             )}
@@ -499,8 +619,10 @@ export default function SearchSurface() {
 
         {/* ===================== RESULTS STATE ===================== */}
         {surfaceState === "results" && (
-          <section className="pb-10">
-            <p className="mb-2 text-sm text-gray-600">{`${committedQuery} options`}</p>
+          <section className="pb-10 motion-safe:animate-[cardIn_250ms_ease-out_both]">
+            <p className="mb-2 text-sm text-text-secondary">
+              {activityDisplayLabel ? `${activityDisplayLabel} activities` : `Activities in ${effectiveLocation?.label ?? committedQuery}`}
+            </p>
             <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
               {["All", ...filterChipActivities].map((f) => {
                 const active = activeFilter === f;
@@ -510,10 +632,10 @@ export default function SearchSurface() {
                     type="button"
                     aria-pressed={active}
                     onClick={() => setActiveFilter(f)}
-                    className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2 ${
+                    className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-all duration-[170ms] ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95 ${
                       active
-                        ? "border-info bg-info font-semibold text-white"
-                        : "border-gray-200 bg-white font-medium text-gray-600 hover:border-info/40 hover:bg-info-soft/40 hover:text-info"
+                        ? "border-transparent bg-sage/15 font-semibold text-sage-text"
+                        : "border-border bg-white font-medium text-text-secondary hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)]"
                     }`}
                   >
                     {f}
@@ -522,57 +644,63 @@ export default function SearchSurface() {
               })}
             </div>
 
-            <div className="mb-4 flex items-center gap-1.5 text-sm text-gray-600">
+            <div className="mb-4 flex items-center gap-1.5 text-sm text-text-secondary">
               <button
                 type="button"
                 onClick={() => setTimeWindow("today")}
-                className={timeWindow === "today" ? "font-semibold text-info underline underline-offset-2" : "hover:text-info"}
+                className={`transition-colors duration-150 ${timeWindow === "today" ? "font-semibold text-sage-text underline underline-offset-2" : "hover:text-sage-text"}`}
               >
                 Today
               </button>
-              <span className="text-gray-300">/</span>
+              /
               <button
                 type="button"
                 onClick={() => setTimeWindow("week")}
-                className={timeWindow === "week" ? "font-semibold text-info underline underline-offset-2" : "hover:text-info"}
+                className={`transition-colors duration-150 ${timeWindow === "week" ? "font-semibold text-sage-text underline underline-offset-2" : "hover:text-sage-text"}`}
               >
                 This Week
               </button>
             </div>
 
-            <div className="flex items-center justify-between border-t border-gray-200/70 py-4 text-xs text-gray-600">
-              <span>{`${resultsFiltered.length} ${resultsFiltered.length === 1 ? "activity" : "activities"} · Last updated 3 hours ago`}</span>
+            <div className="flex items-center justify-between border-t border-border/70 py-4 text-xs text-text-secondary">
+              <span>{`${resultsFiltered.length} ${resultsFiltered.length === 1 ? "activity" : "activities"} ${lastUpdatedLabel ? ` · ${lastUpdatedLabel}` : ""}`}</span>
               <div className="flex flex-shrink-0 items-center gap-1" role="group" aria-label="List density">
                 <button
                   type="button"
                   aria-label="Comfortable list"
                   aria-pressed={density === "comfortable"}
                   onClick={() => setDensityPersisted("comfortable")}
-                  className={`rounded-md p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info ${
-                    density === "comfortable" ? "bg-info text-white" : "text-gray-400 hover:bg-info-soft/40 hover:text-info"
+                  className={`rounded-md p-1.5 transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-90 ${
+                    density === "comfortable" ? "bg-sage/15 text-sage-text" : "text-text-secondary hover:bg-hover-surface hover:text-sage-text"
                   }`}
                 >
-                  <ComfortableListIcon className="h-4 w-4" />
+                  <ComfortableListIcon className={`h-4 w-4 transition-transform duration-200 ${density === "comfortable" ? "scale-100" : "scale-90"}`} />
                 </button>
                 <button
                   type="button"
                   aria-label="Compact list"
                   aria-pressed={density === "compact"}
                   onClick={() => setDensityPersisted("compact")}
-                  className={`rounded-md p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info ${
-                    density === "compact" ? "bg-info text-white" : "text-gray-400 hover:bg-info-soft/40 hover:text-info"
+                  className={`rounded-md p-1.5 transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-90 ${
+                    density === "compact" ? "bg-sage/15 text-sage-text" : "text-text-secondary hover:bg-hover-surface hover:text-sage-text"
                   }`}
                 >
-                  <CompactListIcon className="h-4 w-4" />
+                  <CompactListIcon className={`h-4 w-4 transition-transform duration-200 ${density === "compact" ? "scale-100" : "scale-90"}`} />
                 </button>
               </div>
             </div>
 
             <div className="space-y-8">
-              {resultsFiltered.length === 0 ? (
-                <div className="py-12 text-center">
-                  <p className="text-sm text-gray-600">{emptyStateMessage}</p>
-                  <p className="mt-3 text-xs font-medium uppercase tracking-wide text-gray-400">Try</p>
+              {loading ? (
+                <div className="space-y-4">
+                  <SkeletonCard />
+                  <SkeletonCard />
+                  <SkeletonCard />
+                </div>
+              ) : resultsFiltered.length === 0 ? (
+                <div className="py-12 text-center motion-safe:animate-[cardIn_250ms_ease-out_both]">
+                  <p className="text-sm text-text-secondary">{emptyStateMessage}</p>
+                  <p className="mt-3 text-xs font-medium text-text-secondary/70">Try</p>
                   <div className="mt-2 flex flex-wrap justify-center gap-2">
                     {isUnavailableMunicipality ? (
                       <button
@@ -581,7 +709,7 @@ export default function SearchSurface() {
                           setLocationOverride(undefined);
                           setPersistentLocation(undefined);
                         }}
-                        className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-info/40 hover:bg-info-soft/40 hover:text-info"
+                        className="rounded-full border border-border bg-white px-3.5 py-1.5 text-sm font-medium text-text-secondary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] active:scale-95"
                       >
                         Show Toronto instead
                       </button>
@@ -591,9 +719,9 @@ export default function SearchSurface() {
                           <button
                             type="button"
                             onClick={() => setTimeWindow("week")}
-                            className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-info/40 hover:bg-info-soft/40 hover:text-info"
+                            className="rounded-full border border-border bg-white px-3.5 py-1.5 text-sm font-medium text-text-secondary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] active:scale-95"
                           >
-                            This Week
+                            This week
                           </button>
                         )}
                         {effectiveLocation && (
@@ -603,7 +731,7 @@ export default function SearchSurface() {
                               setLocationOverride(undefined);
                               setPersistentLocation(undefined);
                             }}
-                            className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-info/40 hover:bg-info-soft/40 hover:text-info"
+                            className="rounded-full border border-border bg-white px-3.5 py-1.5 text-sm font-medium text-text-secondary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] active:scale-95"
                           >
                             Nearby areas
                           </button>
@@ -613,7 +741,7 @@ export default function SearchSurface() {
                             key={a}
                             type="button"
                             onClick={() => commitQuery(a)}
-                            className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-info/40 hover:bg-info-soft/40 hover:text-info"
+                            className="rounded-full border border-border bg-white px-3.5 py-1.5 text-sm font-medium text-text-secondary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] active:scale-95"
                           >
                             {a}
                           </button>
@@ -625,12 +753,10 @@ export default function SearchSurface() {
               ) : (
                 resultsByDay.map((d) => (
                   <div key={d.key}>
-                    <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-600">
-                      {RESULT_GROUP_LABELS[d.key]}
-                    </h2>
+                    <h2 className="mb-3 text-base font-semibold text-sage-text">{RESULT_GROUP_LABELS[d.key]}</h2>
                     <div className="space-y-4">
-                      {d.sessions.map((s) => (
-                        <SessionCard key={s.id} s={s} onSelect={setSelectedSession} density={density} />
+                      {d.sessions.map((s, i) => (
+                        <SessionCard key={s.id} s={s} onSelect={setSelectedSession} density={density} delayMs={i * 30} />
                       ))}
                     </div>
                   </div>
@@ -659,23 +785,23 @@ export default function SearchSurface() {
           (() => {
             const ActivityIcon = ACTIVITY_ICONS[getShortcutForActivity(selectedSession.activity) ?? ""];
             return (
-              <p id="quick-action-title" className="flex min-w-0 items-center gap-2 text-[18px] font-bold leading-tight text-gray-900">
-                {ActivityIcon && <ActivityIcon className="h-5 w-5 flex-shrink-0 text-gray-400" />}
+              <h2 id="quick-action-title" className="flex min-w-0 items-center gap-2 text-[18px] font-bold leading-tight text-text-primary">
+                {ActivityIcon && <ActivityIcon className="h-5 w-5 flex-shrink-0 text-text-secondary" />}
                 {selectedSession.activity}
-              </p>
+              </h2>
             );
           })()
         }
       >
         {selectedSession && (
           <>
-            <p className="-mt-2 text-sm text-gray-500">{selectedSession.centre}</p>
+            <p className="-mt-2 text-sm text-text-secondary">{selectedSession.centre}</p>
 
             <a
               ref={directionsRef}
               href="#"
               onClick={(e) => e.preventDefault()}
-              className="mt-5 grid w-full grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl bg-action px-4 py-3 text-sm font-semibold text-action-text transition-colors hover:bg-action/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2"
+              className="mt-5 grid w-full grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl bg-sage-text px-4 py-3 text-sm font-semibold text-white transition-all duration-150 ease-out hover:bg-sage-text/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
             >
               <DirectionsIcon className="h-5 w-5" />
               <span className="text-center">Directions</span>
@@ -691,7 +817,7 @@ export default function SearchSurface() {
                 <a
                   href="#"
                   onClick={(e) => e.preventDefault()}
-                  className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 transition-colors hover:border-info/40 hover:bg-info-soft/40 hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2"
+                  className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-border px-4 py-3 text-sm font-semibold text-text-primary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
                 >
                   <LinkIcon className="h-5 w-5" />
                   <span className="text-center">Website</span>
@@ -702,7 +828,7 @@ export default function SearchSurface() {
                 <a
                   href="#"
                   onClick={(e) => e.preventDefault()}
-                  className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 transition-colors hover:border-info/40 hover:bg-info-soft/40 hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2"
+                  className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-border px-4 py-3 text-sm font-semibold text-text-primary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
                 >
                   <PhoneIcon className="h-5 w-5" />
                   <span className="text-center">Call</span>
@@ -711,7 +837,7 @@ export default function SearchSurface() {
               )}
               <button
                 type="button"
-                className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-info px-4 py-3 text-sm font-semibold text-info transition-colors hover:bg-info-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2"
+                className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-border px-4 py-3 text-sm font-semibold text-text-primary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
               >
                 <ShareIcon className="h-5 w-5" />
                 <span className="text-center">Share</span>
@@ -736,43 +862,43 @@ export default function SearchSurface() {
         titleId="info-sheet-title"
         desktopVariant="modal"
       >
-        <p id="info-sheet-title" className="text-[18px] font-bold text-gray-900">
+        <h2 id="info-sheet-title" className="text-[18px] font-bold text-text-primary">
           About DropIn
-        </p>
-        <p className="mt-2 text-sm text-gray-600">
+        </h2>
+        <p className="mt-2 text-sm text-text-secondary">
           Helping people spend less time searching and more time being active. Discover nearby
           drop-in activities from official recreation providers — all in one place.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-info">Why DropIn</h3>
-        <p className="mt-1 text-sm text-gray-600">
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Why DropIn</h3>
+        <p className="mt-1 text-sm text-text-secondary">
           Community recreation is one of the easiest ways to stay active — but finding what&rsquo;s
           actually on today usually means checking several different websites. DropIn brings it into
           one search.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-info">Our Data</h3>
-        <p className="mt-1 text-sm text-gray-600">
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Our data</h3>
+        <p className="mt-1 text-sm text-text-secondary">
           Schedules come directly from official recreation providers. Whenever possible, DropIn links
           straight to the official source to help keep information accurate.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-info">What You&rsquo;ll Find</h3>
-        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-sm text-gray-600">
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">What you&rsquo;ll find</h3>
+        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-sm text-text-secondary">
           <li>Nearby activities, ranked by what&rsquo;s happening soonest</li>
           <li>Official schedules, not estimates</li>
           <li>Community centre details</li>
           <li>Quick directions to get you there</li>
         </ul>
 
-        <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-info">Feedback</h3>
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Feedback</h3>
         {feedbackStage === "idle" && (
-          <p className="mt-1 text-sm text-gray-600">
+          <p className="mt-1 text-sm text-text-secondary">
             Found something that doesn&rsquo;t look right?{" "}
             <button
               type="button"
               onClick={() => setFeedbackStage("writing")}
-              className="text-info underline underline-offset-2"
+              className="text-sage-text underline underline-offset-2"
             >
               Let us know.
             </button>
@@ -791,7 +917,7 @@ export default function SearchSurface() {
               value={feedbackText}
               onChange={(e) => setFeedbackText(e.target.value)}
               placeholder="What looks wrong? A time, price, or address that's off..."
-              className="w-full resize-none rounded-lg border border-gray-200 p-2.5 text-sm text-gray-700 outline-none transition-colors placeholder:text-gray-400 focus:border-info focus:ring-2 focus:ring-info/40"
+              className="w-full resize-none rounded-lg border border-border p-2.5 text-sm text-text-primary outline-none transition-all duration-150 ease-out placeholder:text-text-secondary/70 focus:border-sage-text focus:ring-2 focus:ring-sage-text/20"
             />
             <div className="mt-2 flex justify-end gap-2">
               <button
@@ -800,7 +926,7 @@ export default function SearchSurface() {
                   setFeedbackStage("idle");
                   setFeedbackText("");
                 }}
-                className="rounded-lg px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                className="rounded-lg px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-150 hover:bg-hover-surface hover:text-text-primary active:scale-95"
               >
                 Cancel
               </button>
@@ -808,7 +934,7 @@ export default function SearchSurface() {
                 type="button"
                 disabled={feedbackText.trim().length === 0}
                 onClick={() => setFeedbackStage("sent")}
-                className="rounded-lg bg-action px-3 py-1.5 text-xs font-semibold text-action-text transition-colors hover:bg-action/90 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-lg bg-terracotta px-3 py-1.5 text-xs font-semibold text-white transition-all duration-150 ease-out hover:bg-terracotta/90 disabled:cursor-not-allowed disabled:opacity-40 active:scale-95"
               >
                 Send
               </button>
@@ -817,12 +943,12 @@ export default function SearchSurface() {
         )}
 
         {feedbackStage === "sent" && (
-          <p className="mt-1 rounded-lg border border-status/25 bg-status/10 px-3 py-2 text-sm text-status">
+          <p className="mt-1 rounded-lg border border-sage-text/25 bg-sage/15 px-3 py-2 text-sm text-sage-text motion-safe:animate-[cardIn_200ms_ease-out_both]">
             Thanks — we&rsquo;ve received your note and will take a look.
           </p>
         )}
 
-        <p className="mt-5 text-xs text-gray-400">DropIn · v1.0</p>
+        <p className="mt-5 text-xs text-text-secondary/70">DropIn · v1.0</p>
       </Sheet>
     </main>
   );
