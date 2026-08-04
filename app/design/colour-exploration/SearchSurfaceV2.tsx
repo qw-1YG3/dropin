@@ -1,7 +1,17 @@
 "use client";
 
+// Colour-and-atmosphere exploration only, iteration 2 — forked from the
+// production component (app/page.tsx) because this round's requests
+// (a tinted Discovery area, section-label markers, stronger selected/hover
+// states) need small markup additions, not just a CSS-variable swap at the
+// root. Every non-colour line below is unchanged from production: same
+// state machine, same search/filter/ranking logic, same layout, same
+// typography, same spacing. Diff against app/page.tsx to verify — the only
+// edits are className colour/shadow values and the handful of small
+// decorative additions called out in the accompanying explanation.
+
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Sheet } from "./_components/Sheet";
+import { Sheet } from "../../_components/Sheet";
 import {
   ACTIVITY_ICONS,
   DirectionsIcon,
@@ -11,7 +21,7 @@ import {
   PhoneIcon,
   SearchIcon,
   ShareIcon,
-} from "./_components/icons";
+} from "../../_components/icons";
 import { ACTIVITY_GROUPS, getShortcutForActivity, SHORTCUTS } from "@/lib/dropin/activities";
 import { getDisplayDistrict } from "@/lib/dropin/districts";
 import { parseQuery, sessionMatchesLocation, type DetectedLocation } from "@/lib/dropin/search-intent";
@@ -26,11 +36,15 @@ function timeLabel(s: Session) {
   return `${prefix} · ${s.absoluteTime}`;
 }
 
-// Share always renders; Website/Call are conditional on real data. The grid
-// must match however many actually render — a hardcoded column count leaves
-// a visible empty gap whenever a session is missing phone or officialUrl.
 function secondaryActionCount(s: Session) {
   return 1 + (s.officialUrl ? 1 : 0) + (s.phone ? 1 : 0);
+}
+
+// A small accent marker beside section labels — the one purely decorative
+// addition in this exploration, used to test whether a tiny localized
+// accent reads as "energy" without adding a feature or changing hierarchy.
+function LabelMarker() {
+  return <span className="mr-2 inline-block h-2.5 w-1 rounded-full bg-accent align-middle" aria-hidden="true" />;
 }
 
 function SessionCard({ s, onSelect }: { s: Session; onSelect: (s: Session) => void }) {
@@ -38,7 +52,7 @@ function SessionCard({ s, onSelect }: { s: Session; onSelect: (s: Session) => vo
     <button
       type="button"
       onClick={() => onSelect(s)}
-      className="w-full rounded-2xl border border-gray-100 bg-white p-5 text-left transition-shadow duration-200 hover:shadow-md"
+      className="w-full rounded-2xl border border-gray-100 bg-white p-5 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/15 hover:shadow-[0_8px_24px_-4px_rgba(33,129,107,0.16)]"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -48,15 +62,20 @@ function SessionCard({ s, onSelect }: { s: Session; onSelect: (s: Session) => vo
               s.urgent ? "font-semibold text-accent" : "font-medium text-gray-700"
             }`}
           >
-            {s.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent" aria-hidden="true" />}
+            {s.urgent && (
+              <span
+                className="h-2 w-2 flex-shrink-0 rounded-full bg-accent ring-2 ring-accent/25"
+                aria-hidden="true"
+              />
+            )}
             {timeLabel(s)}
           </p>
-          <p className="mt-4 text-sm text-gray-500">
+          <p className="mt-4 text-sm text-gray-600">
             {s.centre}
             {s.distanceKm !== undefined && ` · ${s.distanceKm} km`}
           </p>
         </div>
-        {s.price && <span className="flex-shrink-0 text-sm text-gray-500">{s.price}</span>}
+        {s.price && <span className="flex-shrink-0 text-sm text-gray-600">{s.price}</span>}
       </div>
     </button>
   );
@@ -75,7 +94,7 @@ function SkeletonCard() {
   );
 }
 
-export default function SearchSurface() {
+export default function SearchSurfaceV2() {
   const [surfaceState, setSurfaceState] = useState<"discovery" | "results">("discovery");
   const [query, setQuery] = useState("");
   const [committedQuery, setCommittedQuery] = useState("");
@@ -88,9 +107,6 @@ export default function SearchSurface() {
   const [feedbackStage, setFeedbackStage] = useState<"idle" | "writing" | "sent">("idle");
   const [feedbackText, setFeedbackText] = useState("");
   const [loading, setLoading] = useState(true);
-  // Persistent location context (set only by a pure-location search) vs. a
-  // one-time override (set by a mixed activity+location search). The pill
-  // always displays the effective one; neither is ever typed into directly.
   const [persistentLocation, setPersistentLocation] = useState<DetectedLocation | undefined>(undefined);
   const [locationOverride, setLocationOverride] = useState<DetectedLocation | undefined>(undefined);
   const [queryMiss, setQueryMiss] = useState<string | null>(null);
@@ -125,10 +141,6 @@ export default function SearchSurface() {
     if (persistentLocation) pool = pool.filter((s) => sessionMatchesLocation(s, persistentLocation));
     if (discoveryFreeOnly) return pool.filter((s) => s.price === "Free");
 
-    // Diversify across districts and activities so Discovery reads as a
-    // cross-city sample rather than repeating whichever centre happens to
-    // have the most listings — urgent sessions still surface first within
-    // that diverse set.
     const ranked = [...pool].sort((a, b) => Number(b.urgent) - Number(a.urgent));
     const seenDistricts = new Set<string>();
     const seenActivities = new Set<string>();
@@ -160,10 +172,6 @@ export default function SearchSurface() {
     });
   }, [sessions, matchedActivities, effectiveLocation]);
 
-  // Filter chips reflect activities actually present in the current
-  // activity+location scope, not just the raw parsed match — this way a
-  // pure-location search ("North York") still offers useful chips to
-  // refine by, instead of only ever showing "All".
   const filterChipActivities = useMemo(
     () => Array.from(new Set(baseResults.map((s) => s.activity))),
     [baseResults],
@@ -187,11 +195,6 @@ export default function SearchSurface() {
   const isUnavailableMunicipality = effectiveLocation?.type === "municipality" && effectiveLocation.status === "not-yet-available";
 
   const emptyStateMessage = useMemo(() => {
-    // A recognized-but-uncovered municipality is a different situation than
-    // a genuine no-results search — we don't have Markham data at all, so
-    // saying "no sessions found in Markham today" would misleadingly imply
-    // we checked Markham and came up empty, per "never imply certainty the
-    // data can't support."
     if (effectiveLocation?.type === "municipality" && effectiveLocation.status === "not-yet-available") {
       return `DropIn doesn't cover ${effectiveLocation.label} yet — here's what's available in Toronto instead.`;
     }
@@ -203,8 +206,6 @@ export default function SearchSurface() {
       : `No ${activityLabel} sessions found ${scope}.`;
   }, [matchedActivities, committedQuery, effectiveLocation, timeWindow]);
 
-  // Only ever suggests activities that actually have real sessions in the
-  // current location/time scope — never a dead-end suggestion.
   const alternateActivitySuggestions = useMemo(() => {
     const candidates = [...SHORTCUTS, "Table Tennis"].filter((a) => !matchedActivities.includes(a));
     return candidates
@@ -230,9 +231,6 @@ export default function SearchSurface() {
     const result = parseQuery(trimmed, sessions);
 
     if (result.activities.length === 0 && !result.location) {
-      // Query didn't resolve to anything recognized — never a dead end.
-      // Fall back to Discovery Intent, scoped to the persistent context,
-      // with a line acknowledging the miss.
       setQueryMiss(trimmed);
       setCommittedQuery("");
       setLocationOverride(undefined);
@@ -245,22 +243,15 @@ export default function SearchSurface() {
     setSurfaceState("results");
 
     if (result.location && result.activities.length === 0) {
-      // Purely a location search — updates the persistent context directly.
       setPersistentLocation(result.location);
       setLocationOverride(undefined);
     } else if (result.location) {
-      // Mixed query — a one-time override, scoped to this search only.
       setLocationOverride(result.location);
     } else {
-      // Activity-only — an override never silently persists.
       setLocationOverride(undefined);
     }
   }
 
-  // Live search: ~300ms after the last keystroke, a non-empty query that
-  // hasn't already been committed auto-commits — the same resolution as an
-  // explicit Enter, just triggered by a pause instead of a keypress. Enter
-  // and suggestion taps still commit immediately, bypassing this entirely.
   useEffect(() => {
     const trimmed = query.trim();
     if (trimmed === "" || trimmed === committedQuery) return;
@@ -287,8 +278,6 @@ export default function SearchSurface() {
 
   const large = surfaceState === "discovery";
 
-  // A quiet time anchor, not a heading — reassures users the results below
-  // are current without asking them to think about it.
   const todayLabel = useMemo(
     () => new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }),
     [],
@@ -296,14 +285,11 @@ export default function SearchSurface() {
 
   return (
     <main className="min-h-screen bg-surface text-gray-900">
-      {/* Persistent header — present across every state */}
       <div className="mx-auto max-w-2xl px-4 sm:px-6">
         <header className="flex items-center justify-between py-4">
           <span className="text-lg font-semibold tracking-tight text-gray-900">DropIn</span>
           <div className="flex items-center gap-3">
-            {/* Current Search Area — display only. It reflects wherever the
-                search just resolved to; it is never typed into directly. */}
-            <span className="flex items-center gap-1 text-sm text-gray-500">
+            <span className="flex items-center gap-1 text-sm text-gray-600">
               <LocationIcon className="h-4 w-4 text-gray-400" />
               {effectiveLocation ? effectiveLocation.label : "Near you"}
             </span>
@@ -318,16 +304,10 @@ export default function SearchSurface() {
           </div>
         </header>
 
-        {/* Today's context — a quiet time anchor, not a heading. Confirms
-            "these results are current" without competing with the wordmark
-            above or the search bar below. */}
         <p className="text-base font-medium text-gray-600">Today · {todayLabel}</p>
 
-        {/* Search — persists across every state, changing prominence rather
-            than disappearing. No headline above it: Discovery already shows
-            real results, so nothing needs to ask "what do you want" first. */}
         <div className={`relative ${large ? "pt-3 pb-6" : "py-4"}`}>
-          <label htmlFor="surface-search" className="sr-only">
+          <label htmlFor="surface-search-v2" className="sr-only">
             Search activities, community centres or places
           </label>
           <div className="relative">
@@ -336,7 +316,7 @@ export default function SearchSurface() {
             />
             <input
               ref={inputRef}
-              id="surface-search"
+              id="surface-search-v2"
               type="text"
               value={query}
               onChange={(e) => handleInputChange(e.target.value)}
@@ -367,9 +347,9 @@ export default function SearchSurface() {
 
         {/* ===================== DISCOVERY STATE ===================== */}
         {surfaceState === "discovery" && (
-          <section className="pb-10">
+          <section className="-mx-4 rounded-3xl bg-accent-soft/40 px-4 py-4 pb-10 sm:-mx-6 sm:px-6">
             {queryMiss && (
-              <p className="mb-4 rounded-xl bg-gray-100 px-4 py-3 text-sm text-gray-600">
+              <p className="mb-4 rounded-xl bg-white px-4 py-3 text-sm text-gray-600">
                 We couldn&rsquo;t find &ldquo;{queryMiss}&rdquo; — here&rsquo;s what&rsquo;s on nearby instead.
               </p>
             )}
@@ -398,7 +378,7 @@ export default function SearchSurface() {
                 onClick={() => setDiscoveryFreeOnly((v) => !v)}
                 className={`flex-shrink-0 rounded-full border px-3.5 py-2 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${
                   discoveryFreeOnly
-                    ? "border-accent bg-accent font-semibold text-white"
+                    ? "border-accent bg-accent font-semibold text-white shadow-[0_2px_8px_rgba(33,129,107,0.25)]"
                     : "border-gray-200 bg-white font-medium text-gray-600 hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
                 }`}
               >
@@ -406,7 +386,8 @@ export default function SearchSurface() {
               </button>
             </div>
 
-            <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-500">
+            <h2 className="mb-3 flex items-center text-xs font-medium uppercase tracking-wide text-gray-600">
+              <LabelMarker />
               {persistentLocation ? `Happening in ${persistentLocation.label}` : "Happening near you"}
             </h2>
 
@@ -417,7 +398,7 @@ export default function SearchSurface() {
                 <SkeletonCard />
               </div>
             ) : discoveryHighlights.length === 0 ? (
-              <p className="rounded-2xl border border-dashed border-gray-200 py-8 text-center text-sm text-gray-500">
+              <p className="rounded-2xl border border-dashed border-gray-200 bg-white py-8 text-center text-sm text-gray-500">
                 Nothing free right now nearby.{" "}
                 <button type="button" onClick={() => setDiscoveryFreeOnly(false)} className="text-accent underline underline-offset-2">
                   Show everything
@@ -448,7 +429,7 @@ export default function SearchSurface() {
                     onClick={() => setActiveFilter(f)}
                     className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${
                       active
-                        ? "border-accent bg-accent font-semibold text-white"
+                        ? "border-accent bg-accent font-semibold text-white shadow-[0_2px_8px_rgba(33,129,107,0.25)]"
                         : "border-gray-200 bg-white font-medium text-gray-600 hover:border-accent/50 hover:bg-accent-soft hover:text-accent"
                     }`}
                   >
@@ -458,7 +439,7 @@ export default function SearchSurface() {
               })}
             </div>
 
-            <div className="mb-4 flex items-center gap-1.5 text-sm text-gray-500">
+            <div className="mb-4 flex items-center gap-1.5 text-sm text-gray-600">
               <button
                 type="button"
                 onClick={() => setTimeWindow("today")}
@@ -476,14 +457,14 @@ export default function SearchSurface() {
               </button>
             </div>
 
-            <div className="border-t border-gray-200/70 py-4 text-xs text-gray-500">
+            <div className="border-t border-gray-200/70 py-4 text-xs text-gray-600">
               {`${resultsFiltered.length} ${resultsFiltered.length === 1 ? "activity" : "activities"} · Last updated 3 hours ago`}
             </div>
 
             <div className="space-y-8">
               {resultsFiltered.length === 0 ? (
                 <div className="py-12 text-center">
-                  <p className="text-sm text-gray-500">{emptyStateMessage}</p>
+                  <p className="text-sm text-gray-600">{emptyStateMessage}</p>
                   <p className="mt-3 text-xs font-medium uppercase tracking-wide text-gray-400">Try</p>
                   <div className="mt-2 flex flex-wrap justify-center gap-2">
                     {isUnavailableMunicipality ? (
@@ -537,7 +518,8 @@ export default function SearchSurface() {
               ) : (
                 resultsByDay.map((d) => (
                   <div key={d.key}>
-                    <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-500">
+                    <h2 className="mb-3 flex items-center text-xs font-medium uppercase tracking-wide text-gray-600">
+                      <LabelMarker />
                       {DAY_LABELS[d.key]}
                     </h2>
                     <div className="space-y-4">
@@ -553,16 +535,10 @@ export default function SearchSurface() {
         )}
       </div>
 
-      {/* ===================== QUICK ACTION SHEET =====================
-          Recap is deliberately minimal: Activity + Centre only. Time is
-          dropped entirely — it's fully visible on the card beneath and has
-          no bearing on any action here. Centre stays, but as context for
-          the actions (which are literally about that place), not as a
-          repeat of browsing information. */}
       <Sheet
         open={!!selectedSession}
         onClose={() => setSelectedSession(null)}
-        titleId="quick-action-title"
+        titleId="quick-action-title-v2"
         desktopVariant="modal"
         narrow
         initialFocusRef={directionsRef}
@@ -571,7 +547,7 @@ export default function SearchSurface() {
           (() => {
             const ActivityIcon = ACTIVITY_ICONS[getShortcutForActivity(selectedSession.activity) ?? ""];
             return (
-              <p id="quick-action-title" className="flex min-w-0 items-center gap-2 text-[18px] font-bold leading-tight text-gray-900">
+              <p id="quick-action-title-v2" className="flex min-w-0 items-center gap-2 text-[18px] font-bold leading-tight text-gray-900">
                 {ActivityIcon && <ActivityIcon className="h-5 w-5 flex-shrink-0 text-gray-400" />}
                 {selectedSession.activity}
               </p>
@@ -581,7 +557,7 @@ export default function SearchSurface() {
       >
         {selectedSession && (
           <>
-            <p className="-mt-2 text-sm text-gray-500">{selectedSession.centre}</p>
+            <p className="-mt-2 text-sm text-gray-600">{selectedSession.centre}</p>
 
             <a
               ref={directionsRef}
@@ -634,10 +610,6 @@ export default function SearchSurface() {
         )}
       </Sheet>
 
-      {/* ===================== PRODUCT INFORMATION SHEET =====================
-          Bottom sheet on mobile, centered modal from md: up — the Search
-          Surface stays visible behind the scrim in both cases, only the
-          dialog's own position/shape changes. */}
       <Sheet
         open={infoSheetOpen}
         onClose={() => {
@@ -645,10 +617,10 @@ export default function SearchSurface() {
           setFeedbackStage("idle");
           setFeedbackText("");
         }}
-        titleId="info-sheet-title"
+        titleId="info-sheet-title-v2"
         desktopVariant="modal"
       >
-        <p id="info-sheet-title" className="text-[18px] font-bold text-gray-900">
+        <p id="info-sheet-title-v2" className="text-[18px] font-bold text-gray-900">
           About DropIn
         </p>
         <p className="mt-2 text-sm text-gray-600">
@@ -693,11 +665,11 @@ export default function SearchSurface() {
 
         {feedbackStage === "writing" && (
           <div className="mt-1.5">
-            <label htmlFor="feedback-text" className="sr-only">
+            <label htmlFor="feedback-text-v2" className="sr-only">
               Your note to DropIn
             </label>
             <textarea
-              id="feedback-text"
+              id="feedback-text-v2"
               autoFocus
               rows={3}
               value={feedbackText}

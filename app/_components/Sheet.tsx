@@ -24,13 +24,42 @@ type SheetProps = {
    * informational sheets with no single primary action.
    */
   initialFocusRef?: React.RefObject<HTMLElement | null>;
+  /**
+   * Optional content placed in the same row as Close, sharing its
+   * horizontal space instead of leaving Close alone above a title that
+   * renders further down. Use for sheets whose content leads with a short
+   * title (e.g. the Quick Action Sheet's activity name) — an empty header
+   * row above the title wastes vertical space without reading as
+   * intentional whitespace. Leave unset for sheets like Product
+   * Information, whose content doesn't lead with a single short title.
+   */
+  titleSlot?: React.ReactNode;
+  /**
+   * Narrows the desktop centered modal from md:max-w-md to md:max-w-sm.
+   * Use for sparse content (e.g. the Quick Action Sheet's short title, one
+   * line of centre text, and two stacked buttons) where the default width
+   * leaves disproportionate side whitespace relative to how little content
+   * fills it. Has no effect on the mobile bottom sheet, which is already
+   * full-width by nature. Leave unset for content-dense sheets like Product
+   * Information.
+   */
+  narrow?: boolean;
 };
 
 // One overlay mechanism shared by the Quick Action Sheet and the Product
 // Information Sheet — same motion family, same scrim, same accessibility
 // contract, different content payload and (optionally) different desktop
 // placement.
-export function Sheet({ open, onClose, titleId, children, desktopVariant = "sheet", initialFocusRef }: SheetProps) {
+export function Sheet({
+  open,
+  onClose,
+  titleId,
+  children,
+  desktopVariant = "sheet",
+  initialFocusRef,
+  titleSlot,
+  narrow = false,
+}: SheetProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const isModal = desktopVariant === "modal";
 
@@ -61,18 +90,21 @@ export function Sheet({ open, onClose, titleId, children, desktopVariant = "shee
         aria-labelledby={titleId}
         className={`relative w-full max-w-2xl border border-gray-200 bg-white p-5 shadow-lg motion-safe:animate-[slideUp_200ms_ease-out] ${
           isModal
-            ? "rounded-t-2xl border-b-0 md:max-w-md md:rounded-2xl md:border-b md:motion-safe:animate-[scaleIn_200ms_ease-out]"
+            ? `rounded-t-2xl border-b-0 ${narrow ? "md:max-w-sm" : "md:max-w-md"} md:rounded-2xl md:border-b md:motion-safe:animate-[scaleIn_200ms_ease-out]`
             : "rounded-t-2xl border-b-0"
         }`}
       >
-        <div className="mb-3 flex items-center justify-between">
-          <div className={`h-1 w-10 rounded-full bg-gray-200 ${isModal ? "md:hidden" : ""}`} aria-hidden="true" />
+        <div className={`mb-2 flex justify-center ${isModal ? "md:hidden" : ""}`}>
+          <div className="h-1 w-10 rounded-full bg-gray-200" aria-hidden="true" />
+        </div>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          {titleSlot}
           <button
             ref={closeButtonRef}
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="ml-auto rounded-full p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="ml-auto flex-shrink-0 rounded-full p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <CloseIcon className="h-4 w-4" />
           </button>

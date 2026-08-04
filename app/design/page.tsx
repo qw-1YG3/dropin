@@ -12,6 +12,10 @@ type ScreenGroup = {
 
 const DESIGN_PREVIEWS: ScreenGroup[] = [
   {
+    screen: "Search Surface — Colour Exploration",
+    previews: [{ label: "Google Maps × Forest palette", href: "/design/colour-exploration" }],
+  },
+  {
     screen: "Map View",
     previews: [],
   },
