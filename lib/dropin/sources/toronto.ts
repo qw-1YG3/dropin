@@ -62,6 +62,13 @@ function formatAddress(l: RawLocation): string | undefined {
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
+// "None" means no bound on that end, not "unknown" — the raw feed always
+// gives a real Age Min (0 when unrestricted), so only Age Max ever carries
+// the sentinel.
+function parseAge(raw: string): number | undefined {
+  return raw && raw !== "None" ? Number(raw) : undefined;
+}
+
 export function getTorontoSessions(now: Date): Session[] {
   const dropIn = rawDropIn as RawDropInRecord[];
   const locations = rawLocations as RawLocation[];
@@ -99,6 +106,8 @@ export function getTorontoSessions(now: Date): Session[] {
       district: location["District"],
       address: formatAddress(location),
       postalCode: postalCode && postalCode !== "None" ? postalCode : undefined,
+      ageMin: parseAge(r["Age Min"]),
+      ageMax: parseAge(r["Age Max"]),
       officialSource: OFFICIAL_SOURCE,
       lastUpdated: SNAPSHOT_FETCHED_AT,
       verificationStatus: "verified",

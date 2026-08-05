@@ -57,6 +57,40 @@ function secondaryActionCount(s: Session) {
   return 1 + (s.officialUrl ? 1 : 0) + (s.phone ? 1 : 0);
 }
 
+// A real eligibility gate, not a nice-to-have — but "0 to no max" means the
+// source data simply isn't restricting this session, so it renders as
+// nothing rather than a meaningless "Ages 0+".
+function ageRestrictionLabel(s: Session): string | undefined {
+  const min = s.ageMin ?? 0;
+  const max = s.ageMax;
+  if (min <= 0 && max === undefined) return undefined;
+  if (max === undefined) return `Ages ${min}+`;
+  if (min <= 0) return `Up to age ${max}`;
+  return `Ages ${min}–${max}`;
+}
+
+// Shared by the per-session Decision Sheet trust line and the aggregate
+// Results meta line — same relative-freshness math, one place to keep it
+// correct.
+function daysAgoLabel(raw: string): string {
+  const updated = new Date(`${raw}T00:00:00`);
+  const days = Math.floor((Date.now() - updated.getTime()) / (1000 * 60 * 60 * 24));
+  if (days <= 0) return "Updated today";
+  if (days === 1) return "Updated yesterday";
+  return `Updated ${days} days ago`;
+}
+
+// Prefers real coordinates when a future source actually has them; Toronto
+// Open Data doesn't, so today this always falls back to a text-address
+// search query — still a real, working Maps link rather than a stub.
+function directionsUrl(s: Session): string {
+  if (s.latitude !== undefined && s.longitude !== undefined) {
+    return `https://www.google.com/maps/search/?api=1&query=${s.latitude},${s.longitude}`;
+  }
+  const parts = [s.address, s.centre, s.municipality].filter(Boolean);
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parts.join(", "))}`;
+}
+
 type Density = "comfortable" | "compact";
 
 // Compact keeps every field Comfortable shows (activity, time, centre,
@@ -168,6 +202,12 @@ export default function SearchSurface() {
   const [timeWindow, setTimeWindow] = useState<"today" | "week">("today");
   const [discoveryFreeOnly, setDiscoveryFreeOnly] = useState(false);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
+  // Transient "Copied" confirmation on the Share action when the Web Share
+  // API isn't available (most desktop browsers) — reverts on its own, and
+  // resets immediately if the sheet closes so it never lingers into the
+  // next session someone opens.
+  const [shareCopied, setShareCopied] = useState(false);
+  const shareResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [infoSheetOpen, setInfoSheetOpen] = useState(false);
   const [feedbackStage, setFeedbackStage] = useState<"idle" | "writing" | "sent">("idle");
   const [feedbackText, setFeedbackText] = useState("");
@@ -388,12 +428,7 @@ export default function SearchSurface() {
   // string, so it stays true regardless of when the page is loaded.
   const lastUpdatedLabel = useMemo(() => {
     const raw = sessions[0]?.lastUpdated;
-    if (!raw) return undefined;
-    const updated = new Date(`${raw}T00:00:00`);
-    const days = Math.floor((Date.now() - updated.getTime()) / (1000 * 60 * 60 * 24));
-    if (days <= 0) return "Updated today";
-    if (days === 1) return "Updated yesterday";
-    return `Updated ${days} days ago`;
+    return raw ? daysAgoLabel(raw) : undefined;
   }, [sessions]);
 
   // Priority: Starting Soon (urgent) > Starting Today (before 5pm) > Later
@@ -526,6 +561,38 @@ export default function SearchSurface() {
   function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter" && query.trim().length > 0) commitQuery(query.trim());
     if (e.key === "Escape") setSuggestionsOpen(false);
+  }
+
+  // Native share sheet where it exists; a clipboard copy (with a brief
+  // "Copied" confirmation on the button itself) everywhere else — no new
+  // UI, just a real action behind a button that previously did nothing.
+  async function handleShare(s: Session) {
+    const summary = [`${s.activity} — ${s.centre}`, timeLabel(s), s.officialUrl].filter(Boolean).join("\n");
+
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share({
+          title: s.activity,
+          text: `${s.activity} — ${s.centre}`,
+          ...(s.officialUrl ? { url: s.officialUrl } : {}),
+        });
+      } catch {
+        // User cancelled the native share sheet — not an error, nothing to do.
+      }
+      return;
+    }
+
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(summary);
+        setShareCopied(true);
+        if (shareResetTimer.current) clearTimeout(shareResetTimer.current);
+        shareResetTimer.current = setTimeout(() => setShareCopied(false), 1500);
+      } catch {
+        // Clipboard permission denied or unavailable — fail silently rather
+        // than surfacing an error for what's a convenience action.
+      }
+    }
   }
 
   const large = surfaceState === "discovery";
@@ -860,15 +927,19 @@ export default function SearchSurface() {
         )}
       </div>
 
-      {/* ===================== QUICK ACTION SHEET =====================
-          Recap is deliberately minimal: Activity + Centre only. Time is
-          dropped entirely — it's fully visible on the card beneath and has
-          no bearing on any action here. Centre stays, but as context for
-          the actions (which are literally about that place), not as a
-          repeat of browsing information. */}
+      {/* ===================== QUICK ACTION SHEET (Decision Sheet) =====================
+          Everything above the actions exists to answer one question, "should I
+          go?" — in priority order: Identity (activity, already the title; time,
+          first line), Location (centre, address), Eligibility (price, age
+          restriction), Trust (verification, freshness, source). Each line is
+          conditionally rendered and omitted outright when the data isn't
+          available — never a placeholder standing in for missing information. */}
       <Sheet
         open={!!selectedSession}
-        onClose={() => setSelectedSession(null)}
+        onClose={() => {
+          setSelectedSession(null);
+          setShareCopied(false);
+        }}
         titleId="quick-action-title"
         desktopVariant="modal"
         narrow
@@ -888,12 +959,41 @@ export default function SearchSurface() {
       >
         {selectedSession && (
           <>
-            <p className="-mt-2 text-sm text-text-secondary">{selectedSession.centre}</p>
+            {/* Identity: date & time — the hardest constraint, so it leads,
+                and it earns the same urgency styling as the card it was
+                just opened from (bold sage + dot when urgent, medium-weight
+                secondary otherwise) rather than reading flatter here than
+                it did one tap ago. */}
+            <p
+              className={`-mt-2 flex items-center gap-1.5 text-sm ${
+                selectedSession.urgent ? "font-semibold text-sage-text" : "font-medium text-text-secondary"
+              }`}
+            >
+              {selectedSession.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-sage-text" aria-hidden="true" />}
+              {timeLabel(selectedSession)}
+            </p>
+
+            {/* Location: centre — the anchor fact, a shade darker than the
+                supporting address beneath it — then the full address if the
+                source has one. Tight to each other (one cluster); a slightly
+                wider gap above marks this as a new category from Identity. */}
+            <p className="mt-2 text-sm font-medium text-text-primary">{selectedSession.centre}</p>
+            {selectedSession.address && <p className="mt-0.5 text-sm text-text-secondary">{selectedSession.address}</p>}
+
+            {/* Eligibility: price and/or age restriction, one line, omitted
+                entirely when neither is known rather than showing a blank
+                line. A wider gap above marks it as its own category too. */}
+            {(selectedSession.price || ageRestrictionLabel(selectedSession)) && (
+              <p className="mt-2 text-sm text-text-secondary">
+                {[selectedSession.price, ageRestrictionLabel(selectedSession)].filter(Boolean).join(" · ")}
+              </p>
+            )}
 
             <a
               ref={directionsRef}
-              href="#"
-              onClick={(e) => e.preventDefault()}
+              href={directionsUrl(selectedSession)}
+              target="_blank"
+              rel="noopener noreferrer"
               className="mt-5 grid w-full grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl bg-sage-text px-4 py-3 text-sm font-semibold text-white transition-all duration-150 ease-out hover:bg-sage-text/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
             >
               <DirectionsIcon className="h-5 w-5" />
@@ -908,8 +1008,9 @@ export default function SearchSurface() {
             >
               {selectedSession.officialUrl && (
                 <a
-                  href="#"
-                  onClick={(e) => e.preventDefault()}
+                  href={selectedSession.officialUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-border px-4 py-3 text-sm font-semibold text-text-primary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
                 >
                   <LinkIcon className="h-5 w-5" />
@@ -919,8 +1020,7 @@ export default function SearchSurface() {
               )}
               {selectedSession.phone && (
                 <a
-                  href="#"
-                  onClick={(e) => e.preventDefault()}
+                  href={`tel:${selectedSession.phone}`}
                   className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-border px-4 py-3 text-sm font-semibold text-text-primary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
                 >
                   <PhoneIcon className="h-5 w-5" />
@@ -930,13 +1030,30 @@ export default function SearchSurface() {
               )}
               <button
                 type="button"
+                onClick={() => handleShare(selectedSession)}
                 className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-border px-4 py-3 text-sm font-semibold text-text-primary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
               >
                 <ShareIcon className="h-5 w-5" />
-                <span className="text-center">Share</span>
+                <span className="text-center">{shareCopied ? "Copied" : "Share"}</span>
                 <span aria-hidden="true" />
               </button>
             </div>
+
+            {/* Trust: verification, freshness, source. Demoted below the
+                actions on purpose — it helps someone trust the listing, not
+                decide whether to attend, so it shouldn't compete with the
+                decision content above. The divider is the same border-t
+                treatment the Results meta bar already uses to mark exactly
+                this kind of "supporting, not primary" boundary. */}
+            <p className="mt-4 border-t border-border/70 pt-3 text-xs text-text-secondary/70">
+              {[
+                selectedSession.verificationStatus === "verified" ? "Verified" : "Unverified",
+                daysAgoLabel(selectedSession.lastUpdated),
+                selectedSession.officialSource,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
           </>
         )}
       </Sheet>

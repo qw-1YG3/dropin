@@ -27,6 +27,13 @@ export type Session = {
   longitude?: number;
   distanceKm?: number;
   price?: string;
+  // Real eligibility gate, not a nice-to-have: Toronto's own drop-in data
+  // publishes an age range per course (e.g. a "60, no max" 55+ swim, or a
+  // "13–15" youth-only gym slot). ageMin 0 with ageMax undefined means no
+  // real restriction — the Decision Sheet omits the line entirely rather
+  // than showing a meaningless "Ages 0+".
+  ageMin?: number;
+  ageMax?: number;
   phone?: string;
   officialUrl?: string;
   officialSource: string;
