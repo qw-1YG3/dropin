@@ -401,7 +401,13 @@ export default function SearchSurface() {
 
   const resultsFiltered = useMemo(() => {
     return baseResults.filter((s) => {
-      if (timeWindow === "today" && s.day === "tomorrow") return false;
+      // Allowlist, not a blocklist: `day` is now optional and undefined for
+      // anything beyond tomorrow (see lib/dropin/types.ts), so excluding
+      // only "tomorrow" would let a wider future data window leak into the
+      // "Today" view. The API route currently only ever requests two days,
+      // so `day` is always "today" or "tomorrow" in practice — this is a
+      // forward-compatibility guard, not a behaviour change.
+      if (timeWindow === "today" && s.day !== "today") return false;
       if (activeFilter !== "All" && s.activity !== activeFilter) return false;
       return true;
     });
