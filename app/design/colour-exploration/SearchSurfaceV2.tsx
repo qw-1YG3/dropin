@@ -25,14 +25,26 @@ import {
 import { ACTIVITY_GROUPS, getShortcutForActivity, SHORTCUTS } from "@/lib/dropin/activities";
 import { getDisplayDistrict } from "@/lib/dropin/districts";
 import { parseQuery, sessionMatchesLocation, type DetectedLocation } from "@/lib/dropin/search-intent";
+import { sessionStatus } from "@/lib/dropin/time";
 import type { Day, Session } from "@/lib/dropin/types";
 
 const SUGGESTION_POOL = ["Badminton", "Pickleball", "Basketball", "Swimming", "Lane Swim", "Leisure Swim", "Yoga", "Open Gym", "Table Tennis"];
 
 const DAY_LABELS: Record<Day, string> = { today: "Today", tomorrow: "Tomorrow" };
 
+// This exploration snapshot predates the production session-status model
+// (lib/dropin/time.ts's sessionStatus) and the removal of Session.urgent —
+// it's a frozen colour/atmosphere fork, not wired to live production
+// changes, so it gets the smallest possible local shim rather than being
+// migrated to the newer date/status architecture the rest of this file
+// doesn't use either.
+function isSessionUrgent(s: Session): boolean {
+  const status = sessionStatus(new Date(s.startDateTime), new Date(s.endDateTime), new Date());
+  return status === "starting-soon" || status === "in-progress";
+}
+
 function timeLabel(s: Session) {
-  const prefix = s.day === "today" ? (s.urgent ? "Happening soon" : "Today") : "Tomorrow";
+  const prefix = s.day === "today" ? (isSessionUrgent(s) ? "Happening soon" : "Today") : "Tomorrow";
   return `${prefix} · ${s.absoluteTime}`;
 }
 
@@ -59,10 +71,10 @@ function SessionCard({ s, onSelect }: { s: Session; onSelect: (s: Session) => vo
           <p className="text-[18px] font-bold leading-tight text-gray-900">{s.activity}</p>
           <p
             className={`mt-0.5 flex items-center gap-1.5 text-sm ${
-              s.urgent ? "font-semibold text-accent" : "font-medium text-gray-700"
+              isSessionUrgent(s) ? "font-semibold text-accent" : "font-medium text-gray-700"
             }`}
           >
-            {s.urgent && (
+            {isSessionUrgent(s) && (
               <span
                 className="h-2 w-2 flex-shrink-0 rounded-full bg-accent ring-2 ring-accent/25"
                 aria-hidden="true"
@@ -141,7 +153,7 @@ export default function SearchSurfaceV2() {
     if (persistentLocation) pool = pool.filter((s) => sessionMatchesLocation(s, persistentLocation));
     if (discoveryFreeOnly) return pool.filter((s) => s.price === "Free");
 
-    const ranked = [...pool].sort((a, b) => Number(b.urgent) - Number(a.urgent));
+    const ranked = [...pool].sort((a, b) => Number(isSessionUrgent(b)) - Number(isSessionUrgent(a)));
     const seenDistricts = new Set<string>();
     const seenActivities = new Set<string>();
     const diverse: Session[] = [];

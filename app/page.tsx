@@ -18,6 +18,7 @@ import { ACTIVITY_GROUPS, getShortcutForActivity, SHORTCUTS } from "@/lib/dropin
 import { getDisplayDistrict } from "@/lib/dropin/districts";
 import { parseQuery, sessionMatchesLocation, type DetectedLocation } from "@/lib/dropin/search-intent";
 import {
+  clockLabel,
   compareChronologically,
   dateLabel,
   dateStripContextLabel,
@@ -26,10 +27,12 @@ import {
   isToday,
   isTomorrow,
   rollingWindowDates,
+  sessionStatus,
   shortDateLabel,
   timeOfDayBucket,
   toDateKey,
   weekdayLabel,
+  type SessionStatus,
   type TimeOfDay,
 } from "@/lib/dropin/time";
 import type { Session } from "@/lib/dropin/types";
@@ -61,13 +64,24 @@ const TIME_OF_DAY_LABELS: Record<TimeOfDay, string> = {
   evening: "Evening",
 };
 
-// Date-aware, not day-aware: "Happening soon"/"Today"/"Tomorrow" for the
-// near term, the real weekday+date beyond that (dateLabel handles all of
-// this from the canonical `date` field) — never derived from the legacy
-// `day` field, which is undefined past tomorrow.
-function timeLabel(s: Session, now: Date) {
-  const prefix = s.urgent ? "Happening soon" : dateLabel(s.date, now);
-  return `${prefix} · ${s.absoluteTime}`;
+// The one place a session's live status is derived from its real
+// start/end time — every caller that needs to know "is this happening now"
+// computes it here rather than trusting a stored field, so it can never go
+// stale while the page stays open.
+function computeStatus(s: Session, liveNow: Date): SessionStatus {
+  return sessionStatus(new Date(s.startDateTime), new Date(s.endDateTime), liveNow);
+}
+
+// Status-aware, not just date-aware: an in-progress session reads
+// "Happening now · Until [end]" — never "Happening soon," which would be
+// factually wrong for something already running. A not-yet-started session
+// inside the near-term threshold reads "Happening soon"; anything else
+// falls back to the real calendar date (dateLabel), never the legacy `day`
+// field, which is undefined past tomorrow.
+function timeLabel(s: Session, status: SessionStatus, now: Date) {
+  if (status === "in-progress") return `Happening now · Until ${clockLabel(new Date(s.endDateTime))}`;
+  if (status === "starting-soon") return `Happening soon · ${s.absoluteTime}`;
+  return `${dateLabel(s.date, now)} · ${s.absoluteTime}`;
 }
 
 // Share always renders; Website/Call are conditional on real data. The grid
@@ -159,12 +173,14 @@ type Density = "comfortable" | "compact";
 function SessionCard({
   s,
   now,
+  liveNow,
   onSelect,
   density = "comfortable",
   delayMs = 0,
 }: {
   s: Session;
   now: Date;
+  liveNow: Date;
   onSelect: (s: Session) => void;
   density?: Density;
   delayMs?: number;
@@ -174,6 +190,11 @@ function SessionCard({
   // share one slot rather than each claiming their own — the same
   // middot-join treatment the Decision Sheet already uses for this pairing.
   const eligibility = [s.price, ageRestrictionLabel(s)].filter(Boolean).join(" · ");
+  const status = computeStatus(s, liveNow);
+  // Both "starting soon" and "already in progress" are time-sensitive,
+  // actionable-now states — they share the same green dot/text treatment;
+  // only the wording (via timeLabel) tells them apart.
+  const isLive = status === "starting-soon" || status === "in-progress";
 
   if (density === "compact") {
     return (
@@ -188,8 +209,8 @@ function SessionCard({
           {eligibility && <span className="flex-shrink-0 text-xs text-text-secondary">{eligibility}</span>}
         </div>
         <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-text-secondary">
-          {s.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-sage-text" aria-hidden="true" />}
-          <span className={s.urgent ? "font-semibold text-sage-text" : ""}>{timeLabel(s, now)}</span>
+          {isLive && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-sage-text" aria-hidden="true" />}
+          <span className={isLive ? "font-semibold text-sage-text" : ""}>{timeLabel(s, status, now)}</span>
           ·
           <span className="truncate">{s.centre}</span>
         </p>
@@ -209,11 +230,11 @@ function SessionCard({
           <p className="text-[18px] font-bold leading-tight text-text-primary">{s.activity}</p>
           <p
             className={`mt-0.5 flex items-center gap-1.5 text-sm ${
-              s.urgent ? "font-semibold text-sage-text" : "font-medium text-text-secondary"
+              isLive ? "font-semibold text-sage-text" : "font-medium text-text-secondary"
             }`}
           >
-            {s.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-sage-text" aria-hidden="true" />}
-            {timeLabel(s, now)}
+            {isLive && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-sage-text" aria-hidden="true" />}
+            {timeLabel(s, status, now)}
           </p>
           <p className="mt-1 text-sm text-text-secondary">
             {s.centre}
@@ -269,6 +290,14 @@ export default function SearchSurface() {
   const now = useMemo(() => new Date(), []);
   const todayDateKey = useMemo(() => toDateKey(now), [now]);
   const rollingDates = useMemo(() => rollingWindowDates(now, 7), [now]);
+  // Separate from the stable `now` above on purpose: session status
+  // (starting soon / in progress / ended) needs to keep advancing with real
+  // time for as long as the page stays open, while date identity ("today")
+  // deliberately does not — ticking `now` itself would risk the rolling
+  // window's date range shifting mid-session. 30s is frequent enough that a
+  // status transition never reads stale for long, without re-rendering the
+  // whole results list constantly.
+  const [liveNow, setLiveNow] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState<string>(todayDateKey);
   const [timeOfDayFilter, setTimeOfDayFilter] = useState<TimeOfDay | "all">("all");
   const [discoveryFreeOnly, setDiscoveryFreeOnly] = useState(false);
@@ -323,6 +352,11 @@ export default function SearchSurface() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setLiveNow(new Date()), 30000);
+    return () => clearInterval(timer);
   }, []);
 
   // Rotating placeholder — only cycles while the box is empty and unfocused,
@@ -423,19 +457,35 @@ export default function SearchSurface() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [surfaceState]);
 
+  // A session that has ended should not appear as a currently actionable
+  // session — the adapter already excludes sessions ended as of the fetch,
+  // but the client can hold that fetch open far longer than that, so this
+  // re-checks against `liveNow` on every tick rather than only once at
+  // fetch time. Centralized here so every downstream list (Discovery,
+  // Results) inherits the same live behaviour instead of each filtering it
+  // separately.
+  const liveSessions = useMemo(
+    () => sessions.filter((s) => computeStatus(s, liveNow) !== "ended"),
+    [sessions, liveNow],
+  );
+
   const discoveryHighlights = useMemo(() => {
     // Exact date match, not the legacy `day` field — Discovery intentionally
     // stays a today-only feed even though `sessions` itself now spans the
     // full rolling 7-day window Results uses.
-    let pool = sessions.filter((s) => s.date === todayDateKey);
+    let pool = liveSessions.filter((s) => s.date === todayDateKey);
     if (persistentLocation) pool = pool.filter((s) => sessionMatchesLocation(s, persistentLocation));
     if (discoveryFreeOnly) return pool.filter((s) => s.price === "Free");
 
     // Diversify across districts and activities so Discovery reads as a
     // cross-city sample rather than repeating whichever centre happens to
-    // have the most listings — urgent sessions still surface first within
-    // that diverse set.
-    const ranked = [...pool].sort((a, b) => Number(b.urgent) - Number(a.urgent));
+    // have the most listings — sessions already happening now or starting
+    // soon still surface first within that diverse set.
+    const statusRank = (s: Session) => {
+      const status = computeStatus(s, liveNow);
+      return status === "in-progress" ? 2 : status === "starting-soon" ? 1 : 0;
+    };
+    const ranked = [...pool].sort((a, b) => statusRank(b) - statusRank(a));
     const seenDistricts = new Set<string>();
     const seenActivities = new Set<string>();
     const diverse: Session[] = [];
@@ -453,18 +503,18 @@ export default function SearchSurface() {
       if (!diverse.includes(s)) diverse.push(s);
     }
     return diverse;
-  }, [sessions, discoveryFreeOnly, persistentLocation, todayDateKey]);
+  }, [liveSessions, discoveryFreeOnly, persistentLocation, todayDateKey, liveNow]);
 
   const parsed = useMemo(() => parseQuery(committedQuery, sessions), [committedQuery, sessions]);
   const matchedActivities = parsed.activities;
 
   const baseResults = useMemo(() => {
-    return sessions.filter((s) => {
+    return liveSessions.filter((s) => {
       if (matchedActivities.length > 0 && !matchedActivities.includes(s.activity)) return false;
       if (effectiveLocation && !sessionMatchesLocation(s, effectiveLocation)) return false;
       return true;
     });
-  }, [sessions, matchedActivities, effectiveLocation]);
+  }, [liveSessions, matchedActivities, effectiveLocation]);
 
   // Filter chips reflect activities actually present in the current
   // activity+location scope, not just the raw parsed match — this way a
@@ -523,31 +573,34 @@ export default function SearchSurface() {
     return raw ? daysAgoLabel(raw) : undefined;
   }, [sessions]);
 
-  // Grouping depends on which date is selected, not a fixed shape: urgency
-  // language (Starting soon / Starting today / Later today) is only ever
-  // meaningful for the currently-selected date being *today* — isUrgent
-  // requires being within an hour of the real current time, so nothing on a
-  // future date can structurally ever be "starting soon." Future dates use
-  // neutral Morning/Afternoon/Evening grouping instead. When the Time of Day
-  // chip has already narrowed to one bucket, regrouping by that same
-  // dimension would just repeat the active chip as a redundant heading, so
-  // that case collapses to one flat, chronologically-sorted list instead.
+  // Grouping depends on which date is selected, not a fixed shape: live
+  // status (Happening now / Starting soon / Starting today / Later today)
+  // is only ever meaningful for the currently-selected date being *today*
+  // — a future date's sessions can't structurally be "happening now" or
+  // "starting soon" (their start time is more than an hour from `liveNow`
+  // by construction). Future dates use neutral Morning/Afternoon/Evening
+  // grouping instead. When the Time of Day chip has already narrowed to one
+  // bucket, regrouping by that same dimension would just repeat the active
+  // chip as a redundant heading, so that case collapses to one flat,
+  // chronologically-sorted list instead.
   const resultsGrouped = useMemo(() => {
     const sorted = [...resultsFiltered].sort(compareChronologically);
     const isTodaySelected = isToday(selectedDate, now);
 
     if (isTodaySelected) {
+      const statusOf = (s: Session) => computeStatus(s, liveNow);
       const groups = [
-        { key: "startingSoon", label: "Starting soon", sessions: sorted.filter((s) => s.urgent) },
+        { key: "happeningNow", label: "Happening now", sessions: sorted.filter((s) => statusOf(s) === "in-progress") },
+        { key: "startingSoon", label: "Starting soon", sessions: sorted.filter((s) => statusOf(s) === "starting-soon") },
         {
           key: "startingToday",
           label: "Starting today",
-          sessions: sorted.filter((s) => !s.urgent && s.startMinutes < LATER_TODAY_THRESHOLD_MINUTES),
+          sessions: sorted.filter((s) => statusOf(s) === "later" && s.startMinutes < LATER_TODAY_THRESHOLD_MINUTES),
         },
         {
           key: "laterToday",
           label: "Later today",
-          sessions: sorted.filter((s) => !s.urgent && s.startMinutes >= LATER_TODAY_THRESHOLD_MINUTES),
+          sessions: sorted.filter((s) => statusOf(s) === "later" && s.startMinutes >= LATER_TODAY_THRESHOLD_MINUTES),
         },
       ];
       return groups.filter((g) => g.sessions.length > 0);
@@ -563,7 +616,7 @@ export default function SearchSurface() {
       sessions: sorted.filter((s) => timeOfDayBucket(s.startMinutes) === t),
     }));
     return groups.filter((g) => g.sessions.length > 0);
-  }, [resultsFiltered, selectedDate, timeOfDayFilter, now]);
+  }, [resultsFiltered, selectedDate, timeOfDayFilter, now, liveNow]);
 
   const isUnavailableMunicipality = effectiveLocation?.type === "municipality" && effectiveLocation.status === "not-yet-available";
 
@@ -668,6 +721,18 @@ export default function SearchSurface() {
     }
   }
 
+  // Broadens from a single-activity search without starting over — the
+  // activity constraint is entirely query-driven (matchedActivities, via
+  // committedQuery), so removing it means clearing the query itself, not
+  // just the activeFilter chip. Deliberately does not touch selectedDate,
+  // timeOfDayFilter, location, density, or surfaceState: this is a
+  // refinement of the current Results context, not a new search.
+  function exploreAllActivities() {
+    setQuery("");
+    setCommittedQuery("");
+    setActiveFilter("All");
+  }
+
   // Live search: ~300ms after the last keystroke, a non-empty query that
   // hasn't already been committed auto-commits — the same resolution as an
   // explicit Enter, just triggered by a pause instead of a keypress. Enter
@@ -700,7 +765,7 @@ export default function SearchSurface() {
   // "Copied" confirmation on the button itself) everywhere else — no new
   // UI, just a real action behind a button that previously did nothing.
   async function handleShare(s: Session) {
-    const summary = [`${s.activity} — ${s.centre}`, timeLabel(s, now), s.officialUrl].filter(Boolean).join("\n");
+    const summary = [`${s.activity} — ${s.centre}`, timeLabel(s, computeStatus(s, liveNow), now), s.officialUrl].filter(Boolean).join("\n");
 
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
@@ -735,6 +800,11 @@ export default function SearchSurface() {
   const todayLabel = useMemo(
     () => now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }),
     [now],
+  );
+
+  const selectedSessionStatus = useMemo(
+    () => (selectedSession ? computeStatus(selectedSession, liveNow) : undefined),
+    [selectedSession, liveNow],
   );
 
   return (
@@ -911,7 +981,7 @@ export default function SearchSurface() {
               ) : (
                 <div className="space-y-4">
                   {discoveryHighlights.map((s, i) => (
-                    <SessionCard key={s.id} s={s} now={now} onSelect={setSelectedSession} delayMs={i * 30} />
+                    <SessionCard key={s.id} s={s} now={now} liveNow={liveNow} onSelect={setSelectedSession} delayMs={i * 30} />
                   ))}
                 </div>
               )}
@@ -924,8 +994,29 @@ export default function SearchSurface() {
           <section
             className={`pb-10 ${surfaceExiting ? "motion-safe:animate-[fadeOut_100ms_ease-out_both]" : "motion-safe:animate-[cardIn_220ms_ease-out_both]"}`}
           >
-            <p className="mb-2 text-sm text-text-secondary">
-              {activityDisplayLabel ? `${activityDisplayLabel} activities` : `Activities in ${effectiveLocation?.label ?? committedQuery}`}
+            <p className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm text-text-secondary">
+              <span>
+                {activityDisplayLabel
+                  ? `${activityDisplayLabel} activities`
+                  : effectiveLocation
+                    ? `Activities in ${effectiveLocation.label}`
+                    : committedQuery
+                      ? `Activities in ${committedQuery}`
+                      : "All activities"}
+              </span>
+              {/* The activity name above is context, not a filter — this is
+                  the one explicit way back to the unscoped set, so a single-
+                  activity search never becomes a dead end. Only meaningful
+                  when a real activity constraint exists to remove. */}
+              {matchedActivities.length > 0 && (
+                <button
+                  type="button"
+                  onClick={exploreAllActivities}
+                  className="text-sage-text underline underline-offset-2 transition-colors duration-150 ease-out hover:text-sage-text/80"
+                >
+                  Explore all activities
+                </button>
+              )}
             </p>
 
             {/* Date navigator — deliberately NOT styled like the pill filter
@@ -981,33 +1072,41 @@ export default function SearchSurface() {
                 Discovery already uses for its own Free toggle) rather than
                 each claiming a full row, so adding Time of Day doesn't push
                 the control cluster to four equally-prominent rows before the
-                first result. Time of Day only appears once there's a real
-                choice to make (more than one bucket present for the current
-                date+activity scope) and behaves as a toggle, like Discovery's
-                Free chip — tapping the active one again clears it. */}
-            <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-              {["All", ...filterChipActivities].map((f) => {
-                const active = activeFilter === f;
-                return (
-                  <button
-                    key={f}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setActiveFilter(f)}
-                    className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-all duration-[170ms] ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95 ${
-                      active
-                        ? "border-transparent bg-sage/15 font-semibold text-sage-text"
-                        : "border-border bg-white font-medium text-text-secondary hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)]"
-                    }`}
-                  >
-                    {f}
-                  </button>
-                );
-              })}
-              {timeOfDayOptions.length > 1 && (
-                <>
+                first result. The activity subtype pair (All | X) only
+                renders when a genuine choice exists — a single-activity
+                search already says "X activities" in the context line
+                above, so repeating it as "All | X" would be a redundant
+                filter that visibly does nothing when tapped. Time of Day
+                likewise only appears once there's a real choice to make,
+                and behaves as a toggle, like Discovery's Free chip —
+                tapping the active one again clears it. The whole row
+                disappears when neither has anything to offer. */}
+            {(filterChipActivities.length > 1 || timeOfDayOptions.length > 1) && (
+              <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+                {filterChipActivities.length > 1 &&
+                  ["All", ...filterChipActivities].map((f) => {
+                    const active = activeFilter === f;
+                    return (
+                      <button
+                        key={f}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => setActiveFilter(f)}
+                        className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-all duration-[170ms] ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95 ${
+                          active
+                            ? "border-transparent bg-sage/15 font-semibold text-sage-text"
+                            : "border-border bg-white font-medium text-text-secondary hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)]"
+                        }`}
+                      >
+                        {f}
+                      </button>
+                    );
+                  })}
+                {filterChipActivities.length > 1 && timeOfDayOptions.length > 1 && (
                   <span className="my-1 w-px flex-shrink-0 self-stretch bg-border" aria-hidden="true" />
-                  {timeOfDayOptions.map((t) => {
+                )}
+                {timeOfDayOptions.length > 1 &&
+                  timeOfDayOptions.map((t) => {
                     const active = timeOfDayFilter === t;
                     return (
                       <button
@@ -1025,9 +1124,8 @@ export default function SearchSurface() {
                       </button>
                     );
                   })}
-                </>
-              )}
-            </div>
+              </div>
+            )}
 
             <div className="flex items-center justify-between border-t border-border/70 py-4 text-xs text-text-secondary">
               <span>{`${resultsFiltered.length} ${resultsFiltered.length === 1 ? "activity" : "activities"} ${lastUpdatedLabel ? ` · ${lastUpdatedLabel}` : ""}`}</span>
@@ -1100,6 +1198,15 @@ export default function SearchSurface() {
                             Clear time filter
                           </button>
                         )}
+                        {matchedActivities.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={exploreAllActivities}
+                            className="rounded-full border border-border bg-white px-3.5 py-1.5 text-sm font-medium text-text-secondary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] active:scale-95"
+                          >
+                            Explore all activities
+                          </button>
+                        )}
                         {nextAvailableDate && (
                           <button
                             type="button"
@@ -1141,7 +1248,7 @@ export default function SearchSurface() {
                     {d.label && <h2 className="mb-3 text-base font-semibold text-sage-text">{d.label}</h2>}
                     <div className="space-y-4">
                       {d.sessions.map((s, i) => (
-                        <SessionCard key={s.id} s={s} now={now} onSelect={setSelectedSession} density={density} delayMs={i * 30} />
+                        <SessionCard key={s.id} s={s} now={now} liveNow={liveNow} onSelect={setSelectedSession} density={density} delayMs={i * 30} />
                       ))}
                     </div>
                   </div>
@@ -1191,11 +1298,15 @@ export default function SearchSurface() {
                 it did one tap ago. */}
             <p
               className={`-mt-2 flex items-center gap-1.5 text-sm ${
-                selectedSession.urgent ? "font-semibold text-sage-text" : "font-medium text-text-secondary"
+                selectedSessionStatus === "starting-soon" || selectedSessionStatus === "in-progress"
+                  ? "font-semibold text-sage-text"
+                  : "font-medium text-text-secondary"
               }`}
             >
-              {selectedSession.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-sage-text" aria-hidden="true" />}
-              {timeLabel(selectedSession, now)}
+              {(selectedSessionStatus === "starting-soon" || selectedSessionStatus === "in-progress") && (
+                <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-sage-text" aria-hidden="true" />
+              )}
+              {timeLabel(selectedSession, selectedSessionStatus!, now)}
             </p>
 
             {/* Location: centre — the anchor fact, a shade darker than the
@@ -1301,30 +1412,31 @@ export default function SearchSurface() {
           About DropIn
         </h2>
         <p className="mt-2 text-sm text-text-secondary">
-          Helping people spend less time searching and more time being active. Discover nearby
-          drop-in activities from official recreation providers — all in one place.
+          DropIn makes it easier to find drop-in activities happening at community centres near you.
+        </p>
+        <p className="mt-2 text-sm text-text-secondary">
+          Search for an activity, choose a day and time, and quickly see what&rsquo;s available —
+          without checking community centre schedules one by one.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Why DropIn</h3>
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Where does the information come from?</h3>
         <p className="mt-1 text-sm text-text-secondary">
-          Community recreation is one of the easiest ways to stay active — but finding what&rsquo;s
-          actually on today usually means checking several different websites. DropIn brings it into
-          one search.
+          DropIn brings together publicly available recreation schedules from participating
+          municipalities. We regularly refresh our listings, but schedules can change, so we recommend
+          checking the official source before you head out.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Our data</h3>
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Built for easier local recreation</h3>
         <p className="mt-1 text-sm text-text-secondary">
-          Schedules come directly from official recreation providers. Whenever possible, DropIn links
-          straight to the official source to help keep information accurate.
+          Whether you&rsquo;re looking for badminton tonight, a weekend swim, or simply something
+          active nearby, DropIn is designed to help you find an option with less searching.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">What you&rsquo;ll find</h3>
-        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-sm text-text-secondary">
-          <li>Nearby activities, ranked by what&rsquo;s happening soonest</li>
-          <li>Official schedules, not estimates</li>
-          <li>Community centre details</li>
-          <li>Quick directions to get you there</li>
-        </ul>
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Data sources</h3>
+        <p className="mt-1 text-sm text-text-secondary">
+          DropIn currently covers the City of Toronto, using the City&rsquo;s official Open Data
+          recreation listings. We&rsquo;re working to bring in more municipalities over time.
+        </p>
 
         <h3 className="mt-4 text-xs font-semibold text-sage-text">Feedback</h3>
         {feedbackStage === "idle" && (

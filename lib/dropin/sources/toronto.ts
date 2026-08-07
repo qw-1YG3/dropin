@@ -18,7 +18,7 @@
 // a projection/expansion engine — building one here would be solving a
 // problem this source doesn't actually have.
 import { getShortcutForActivity } from "../activities";
-import { formatAbsoluteTime, hasEnded, isUrgent, isWithinRollingWindow, legacyDay, weekdayLabel } from "../time";
+import { formatAbsoluteTime, hasEnded, isWithinRollingWindow, legacyDay, weekdayLabel } from "../time";
 import type { Session } from "../types";
 
 import rawDropIn from "@/data/toronto-open-data/drop-in.json";
@@ -213,7 +213,6 @@ export function getTorontoSessions(now: Date, options?: { days?: number }): Sess
       date: dateKey,
       dayOfWeek: weekdayLabel(dateKey),
       day: legacyDay(dateKey, now),
-      urgent: isUrgent(start, end, now),
       absoluteTime: formatAbsoluteTime(r["Start Hour"], r["Start Minute"], r["End Hour"], r["End Min"]),
       startMinutes: r["Start Hour"] * 60 + r["Start Minute"],
       startDateTime: `${dateKey}T${pad2(r["Start Hour"])}:${pad2(r["Start Minute"])}:00`,

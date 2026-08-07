@@ -46,7 +46,11 @@ export type Session = {
   // that. Kept only so the existing UI keeps working unchanged until a
   // future sprint rebuilds it against the real date range.
   day?: Day;
-  urgent: boolean;
+  // Live status (starting-soon / in-progress / ended) is deliberately NOT
+  // stored here — it depends on "now," and a boolean baked in at fetch time
+  // goes stale the moment real time moves past it while the page stays
+  // open. Compute it on demand from startDateTime/endDateTime via
+  // lib/dropin/time.ts's sessionStatus() instead.
   absoluteTime: string;
   startMinutes: number;
   // Local wall-clock datetimes (no UTC offset, deliberately) — the source

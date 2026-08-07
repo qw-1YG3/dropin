@@ -159,16 +159,30 @@ export function hasEnded(end: Date, now: Date): boolean {
   return end.getTime() <= now.getTime();
 }
 
-// A session counts as "happening soon" when it's already started (or starts
-// within the next hour) and hasn't ended yet — computed against the real
-// current time, not baked into stored data, so it stays correct no matter
-// when the page is loaded. Naturally only ever true for the very near
-// term: a session on day 4 of a rolling window has a start time far more
-// than an hour away from "now" by construction, so this needs no separate
-// date check to stay correct across a wider range.
-export function isUrgent(start: Date, end: Date, now: Date): boolean {
-  if (hasEnded(end, now)) return false;
-  return start.getTime() - now.getTime() <= 60 * 60 * 1000;
+export type SessionStatus = "starting-soon" | "in-progress" | "later" | "ended";
+
+// The one centralized model for a session's live status against its real
+// start/end time and the current moment. Replaces the old single "urgent"
+// boolean, which conflated "starts within the hour" with "already
+// started": for an in-progress session, start-minus-now is negative, and a
+// negative number is always <= one hour, so the old check quietly labelled
+// a session that had already started as "Happening soon." Computed fresh
+// against a live `now` rather than baked into stored data, so status stays
+// correct for as long as the page stays open, not just at fetch time.
+export function sessionStatus(start: Date, end: Date, now: Date): SessionStatus {
+  if (hasEnded(end, now)) return "ended";
+  if (start.getTime() <= now.getTime()) return "in-progress";
+  if (start.getTime() - now.getTime() <= 60 * 60 * 1000) return "starting-soon";
+  return "later";
+}
+
+// "6:45 PM" from a Date's own local wall-clock time — used wherever only one
+// endpoint (not a start–end range) needs to be shown, e.g. "Happening now ·
+// Until 6:45 PM". Reuses formatClock so there's exactly one place that knows
+// how to render a 12-hour clock string.
+export function clockLabel(d: Date): string {
+  const { display, period } = formatClock(d.getHours(), d.getMinutes());
+  return `${display} ${period}`;
 }
 
 export type TimeOfDay = "morning" | "afternoon" | "evening";
