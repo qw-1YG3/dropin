@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sheet } from "./_components/Sheet";
 import {
   ACTIVITY_ICONS,
@@ -132,11 +132,19 @@ function directionsUrl(s: Session): string {
 // row that has nothing more to show. A 1px tolerance absorbs subpixel
 // rounding so the fade doesn't flicker right at the boundary.
 function useTrailingScrollFade<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
+  // A callback ref, not useRef + a mount-only effect: the scroll container
+  // this attaches to (date strip, activity subtype row) can mount well
+  // after this component's own first render — Results doesn't exist in the
+  // DOM until a search commits — so an effect with `[]` deps would run once
+  // while `ref.current` is still null and then never re-check it. Storing
+  // the node in state instead means the listener-attaching effect below
+  // re-runs every time the underlying element actually changes (mounts,
+  // unmounts, or gets replaced), not just once at component mount.
+  const [el, setEl] = useState<T | null>(null);
+  const ref = useCallback((node: T | null) => setEl(node), []);
   const [showFade, setShowFade] = useState(false);
 
   useEffect(() => {
-    const el = ref.current;
     if (!el) return;
 
     const update = () => {
@@ -157,7 +165,7 @@ function useTrailingScrollFade<T extends HTMLElement>() {
       resizeObserver.disconnect();
       window.removeEventListener("load", update);
     };
-  }, []);
+  }, [el]);
 
   return { ref, showFade };
 }
@@ -303,6 +311,7 @@ export default function SearchSurface() {
   const [discoveryFreeOnly, setDiscoveryFreeOnly] = useState(false);
   const discoveryCarouselScroll = useTrailingScrollFade<HTMLDivElement>();
   const dateStripScroll = useTrailingScrollFade<HTMLDivElement>();
+  const subtypeScroll = useTrailingScrollFade<HTMLDivElement>();
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   // Transient "Copied" confirmation on the Share action when the Web Share
   // API isn't available (most desktop browsers) — reverts on its own, and
@@ -1067,24 +1076,51 @@ export default function SearchSurface() {
               )}
             </div>
 
-            {/* Refinements — activity subtype and time-of-day chips share one
-                scrollable row (separated by the same divider treatment
-                Discovery already uses for its own Free toggle) rather than
-                each claiming a full row, so adding Time of Day doesn't push
-                the control cluster to four equally-prominent rows before the
-                first result. The activity subtype pair (All | X) only
-                renders when a genuine choice exists — a single-activity
-                search already says "X activities" in the context line
-                above, so repeating it as "All | X" would be a redundant
-                filter that visibly does nothing when tapped. Time of Day
-                likewise only appears once there's a real choice to make,
+            {/* Time of day — its own row, deliberately never sharing a
+                scrollable container with activity subtype chips. Subtype
+                lists (e.g. every Swimming variant) can run long enough to
+                push a shared row's later chips out of the visible area, and
+                time-of-day is too high-value a refinement to risk becoming
+                undiscoverable that way. At most 3 short chips, so this never
+                needs to scroll — flex-wrap is a safety net, not the primary
+                mechanism. Only rendered once there's a real choice to make,
                 and behaves as a toggle, like Discovery's Free chip —
-                tapping the active one again clears it. The whole row
-                disappears when neither has anything to offer. */}
-            {(filterChipActivities.length > 1 || timeOfDayOptions.length > 1) && (
-              <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-                {filterChipActivities.length > 1 &&
-                  ["All", ...filterChipActivities].map((f) => {
+                tapping the active one again clears it. */}
+            {timeOfDayOptions.length > 1 && (
+              <div className="mb-2 flex flex-wrap gap-2" role="group" aria-label="Time of day">
+                {timeOfDayOptions.map((t) => {
+                  const active = timeOfDayFilter === t;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setTimeOfDayFilter(active ? "all" : t)}
+                      className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-all duration-[170ms] ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95 ${
+                        active
+                          ? "border-transparent bg-sage/15 font-semibold text-sage-text"
+                          : "border-border bg-white font-medium text-text-secondary hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)]"
+                      }`}
+                    >
+                      {TIME_OF_DAY_LABELS[t]}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Activity subtype — a second, independent row below time of
+                day, only rendered when a genuine choice exists. A single-
+                activity search already says "X activities" in the context
+                line above, so repeating it as "All | X" would be a
+                redundant filter that visibly does nothing when tapped. Can
+                run long (every Swimming variant, say), so it gets its own
+                scroll container and trailing fade rather than ever
+                competing with time-of-day for horizontal space. */}
+            {filterChipActivities.length > 1 && (
+              <div className="relative mb-3">
+                <div ref={subtypeScroll.ref} className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Activity subtype">
+                  {["All", ...filterChipActivities].map((f) => {
                     const active = activeFilter === f;
                     return (
                       <button
@@ -1102,28 +1138,13 @@ export default function SearchSurface() {
                       </button>
                     );
                   })}
-                {filterChipActivities.length > 1 && timeOfDayOptions.length > 1 && (
-                  <span className="my-1 w-px flex-shrink-0 self-stretch bg-border" aria-hidden="true" />
+                </div>
+                {subtypeScroll.showFade && (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-r from-transparent to-surface"
+                  />
                 )}
-                {timeOfDayOptions.length > 1 &&
-                  timeOfDayOptions.map((t) => {
-                    const active = timeOfDayFilter === t;
-                    return (
-                      <button
-                        key={t}
-                        type="button"
-                        aria-pressed={active}
-                        onClick={() => setTimeOfDayFilter(active ? "all" : t)}
-                        className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-all duration-[170ms] ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95 ${
-                          active
-                            ? "border-transparent bg-sage/15 font-semibold text-sage-text"
-                            : "border-border bg-white font-medium text-text-secondary hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)]"
-                        }`}
-                      >
-                        {TIME_OF_DAY_LABELS[t]}
-                      </button>
-                    );
-                  })}
               </div>
             )}
 
