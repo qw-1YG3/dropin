@@ -102,6 +102,44 @@ export function dateLabel(dateKey: string, now: Date): string {
   return `${weekdayLabel(dateKey)}, ${MONTH_NAMES[d.getMonth()]} ${d.getDate()}`;
 }
 
+// Compact label for a date-strip chip — "Today"/"Tomorrow" for the near
+// term (matching `dateLabel`), "{Weekday-abbrev} {day}" beyond that, e.g.
+// "Sat 8". Deliberately shorter than `dateLabel`, which spells the weekday
+// out in full for contexts with room for it.
+export function shortDateLabel(dateKey: string, now: Date): string {
+  if (isToday(dateKey, now)) return "Today";
+  if (isTomorrow(dateKey, now)) return "Tomorrow";
+  const d = localMidnight(dateKey);
+  return `${weekdayLabel(dateKey).slice(0, 3)} ${d.getDate()}`;
+}
+
+// The two-line date-strip pieces: a short top context word ("Today" for
+// the current date, a 3-letter weekday abbreviation otherwise — never
+// "Tomorrow," which is long enough to break the strip's uniform rhythm)
+// and a "Mon D" bottom line that always carries the real calendar date, so
+// "Today" never stands alone without the date underneath it.
+export function dateStripContextLabel(dateKey: string, now: Date): string {
+  if (isToday(dateKey, now)) return "Today";
+  return weekdayLabel(dateKey).slice(0, 3);
+}
+
+export function dateStripDateLabel(dateKey: string): string {
+  const d = localMidnight(dateKey);
+  return `${MONTH_NAMES[d.getMonth()]} ${d.getDate()}`;
+}
+
+// Full, unambiguous label for accessibility — always states the real
+// calendar date, even for "Today"/"Tomorrow," which alone don't tell a
+// screen-reader user landing on a date-strip control which date that
+// actually is.
+export function fullDateLabel(dateKey: string, now: Date): string {
+  const d = localMidnight(dateKey);
+  const calendarPart = `${weekdayLabel(dateKey)}, ${MONTH_NAMES[d.getMonth()]} ${d.getDate()}`;
+  if (isToday(dateKey, now)) return `Today, ${calendarPart}`;
+  if (isTomorrow(dateKey, now)) return `Tomorrow, ${calendarPart}`;
+  return calendarPart;
+}
+
 function formatClock(hour: number, minute: number): { display: string; period: "AM" | "PM" } {
   const period: "AM" | "PM" = hour >= 12 ? "PM" : "AM";
   const h12 = hour % 12 === 0 ? 12 : hour % 12;

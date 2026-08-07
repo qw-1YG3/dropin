@@ -6,16 +6,12 @@ import { getAllSessions } from "@/lib/dropin/sources";
 // small, already-filtered, normalized Session[] it actually needs, combined
 // across every registered municipality.
 //
-// The data layer can now honestly serve a real rolling 7-day window (see
-// lib/dropin/sources/toronto.ts and lib/dropin/time.ts) — this route still
-// explicitly requests only 2 days (today/tomorrow) on purpose. The Results
-// UI (Discovery's highlight pool, the Today/This Week toggle, day-based
-// grouping) was all built against a strictly two-day assumption; widening
-// this without first rebuilding that UI would make the meta count and the
-// visible list disagree, since day-3-onward sessions would be present in
-// the data but invisible in the current grouping. Raise `days` here once
-// that UI work ships.
+// The full rolling 7-day window — the Results UI (date strip, date-scoped
+// filtering/grouping, time-of-day refinement) now understands real calendar
+// dates throughout, and Discovery's own highlight pool filters by an exact
+// `date === today` match rather than the legacy two-day-only `day` field, so
+// it stays scoped to today regardless of how much the fetched dataset covers.
 export async function GET() {
-  const sessions = getAllSessions(new Date(), { days: 2 });
+  const sessions = getAllSessions(new Date(), { days: 7 });
   return NextResponse.json({ sessions });
 }

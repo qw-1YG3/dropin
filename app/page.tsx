@@ -17,6 +17,21 @@ import {
 import { ACTIVITY_GROUPS, getShortcutForActivity, SHORTCUTS } from "@/lib/dropin/activities";
 import { getDisplayDistrict } from "@/lib/dropin/districts";
 import { parseQuery, sessionMatchesLocation, type DetectedLocation } from "@/lib/dropin/search-intent";
+import {
+  compareChronologically,
+  dateLabel,
+  dateStripContextLabel,
+  dateStripDateLabel,
+  fullDateLabel,
+  isToday,
+  isTomorrow,
+  rollingWindowDates,
+  shortDateLabel,
+  timeOfDayBucket,
+  toDateKey,
+  weekdayLabel,
+  type TimeOfDay,
+} from "@/lib/dropin/time";
 import type { Session } from "@/lib/dropin/types";
 
 const SUGGESTION_POOL = ["Badminton", "Pickleball", "Basketball", "Swimming", "Lane Swim", "Leisure Swim", "Yoga", "Open Gym", "Table Tennis"];
@@ -35,18 +50,23 @@ const PLACEHOLDER_ROTATION = [
 
 // Today is split by real start time, not a fixed label — "later" means
 // after 5pm, a simple, statable threshold rather than an arbitrary feel.
+// The same boundary defines the Evening time-of-day bucket (see
+// lib/dropin/time.ts's timeOfDayBucket), so "Later today" and "Evening"
+// never disagree about what counts as evening.
 const LATER_TODAY_THRESHOLD_MINUTES = 17 * 60;
 
-type ResultGroup = "startingSoon" | "startingToday" | "laterToday" | "tomorrow";
-const RESULT_GROUP_LABELS: Record<ResultGroup, string> = {
-  startingSoon: "Starting soon",
-  startingToday: "Starting today",
-  laterToday: "Later today",
-  tomorrow: "Tomorrow",
+const TIME_OF_DAY_LABELS: Record<TimeOfDay, string> = {
+  morning: "Morning",
+  afternoon: "Afternoon",
+  evening: "Evening",
 };
 
-function timeLabel(s: Session) {
-  const prefix = s.day === "today" ? (s.urgent ? "Happening soon" : "Today") : "Tomorrow";
+// Date-aware, not day-aware: "Happening soon"/"Today"/"Tomorrow" for the
+// near term, the real weekday+date beyond that (dateLabel handles all of
+// this from the canonical `date` field) — never derived from the legacy
+// `day` field, which is undefined past tomorrow.
+function timeLabel(s: Session, now: Date) {
+  const prefix = s.urgent ? "Happening soon" : dateLabel(s.date, now);
   return `${prefix} · ${s.absoluteTime}`;
 }
 
@@ -91,6 +111,43 @@ function directionsUrl(s: Session): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parts.join(", "))}`;
 }
 
+// Shared by every horizontally-scrolling chip/date row that can overflow —
+// shows a trailing fade only when there's real content past the visible
+// edge, and hides it again once scrolled to the end or if everything
+// already fits, so it never reads as a decorative flourish sitting over a
+// row that has nothing more to show. A 1px tolerance absorbs subpixel
+// rounding so the fade doesn't flicker right at the boundary.
+function useTrailingScrollFade<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [showFade, setShowFade] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const update = () => {
+      const hasOverflow = el.scrollWidth - el.clientWidth > 1;
+      const atEnd = el.scrollLeft >= el.scrollWidth - el.clientWidth - 1;
+      setShowFade(hasOverflow && !atEnd);
+    };
+
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const resizeObserver = new ResizeObserver(update);
+    resizeObserver.observe(el);
+    // Fonts settling in after first paint can change chip widths without
+    // resizing the container itself — a load-time recheck catches that.
+    window.addEventListener("load", update);
+    return () => {
+      el.removeEventListener("scroll", update);
+      resizeObserver.disconnect();
+      window.removeEventListener("load", update);
+    };
+  }, []);
+
+  return { ref, showFade };
+}
+
 type Density = "comfortable" | "compact";
 
 // Compact keeps every field Comfortable shows (activity, time, centre,
@@ -101,16 +158,22 @@ type Density = "comfortable" | "compact";
 // readability, one-column scrolling" rather than a grid.
 function SessionCard({
   s,
+  now,
   onSelect,
   density = "comfortable",
   delayMs = 0,
 }: {
   s: Session;
+  now: Date;
   onSelect: (s: Session) => void;
   density?: Density;
   delayMs?: number;
 }) {
   const enterStyle = { animationDelay: `${delayMs}ms` } as React.CSSProperties;
+  // Price and age restriction are both short eligibility facts, so they
+  // share one slot rather than each claiming their own — the same
+  // middot-join treatment the Decision Sheet already uses for this pairing.
+  const eligibility = [s.price, ageRestrictionLabel(s)].filter(Boolean).join(" · ");
 
   if (density === "compact") {
     return (
@@ -122,11 +185,11 @@ function SessionCard({
       >
         <div className="flex items-center justify-between gap-3">
           <p className="truncate text-[15px] font-bold leading-tight text-text-primary">{s.activity}</p>
-          {s.price && <span className="flex-shrink-0 text-xs text-text-secondary">{s.price}</span>}
+          {eligibility && <span className="flex-shrink-0 text-xs text-text-secondary">{eligibility}</span>}
         </div>
         <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-text-secondary">
           {s.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-sage-text" aria-hidden="true" />}
-          <span className={s.urgent ? "font-semibold text-sage-text" : ""}>{timeLabel(s)}</span>
+          <span className={s.urgent ? "font-semibold text-sage-text" : ""}>{timeLabel(s, now)}</span>
           ·
           <span className="truncate">{s.centre}</span>
         </p>
@@ -150,14 +213,14 @@ function SessionCard({
             }`}
           >
             {s.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-sage-text" aria-hidden="true" />}
-            {timeLabel(s)}
+            {timeLabel(s, now)}
           </p>
           <p className="mt-1 text-sm text-text-secondary">
             {s.centre}
             {s.distanceKm !== undefined && ` · ${s.distanceKm} km`}
           </p>
         </div>
-        {s.price && <span className="flex-shrink-0 text-sm text-text-secondary">{s.price}</span>}
+        {eligibility && <span className="flex-shrink-0 text-sm text-text-secondary">{eligibility}</span>}
       </div>
     </button>
   );
@@ -199,8 +262,18 @@ export default function SearchSurface() {
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [activeFilter, setActiveFilter] = useState("All");
-  const [timeWindow, setTimeWindow] = useState<"today" | "week">("today");
+  // A stable "now" for the whole session — computed once at mount, same
+  // precedent as the header's own todayLabel below, rather than re-evaluated
+  // on every render (which would make the date strip's window silently
+  // shift if the tab were left open across a real midnight).
+  const now = useMemo(() => new Date(), []);
+  const todayDateKey = useMemo(() => toDateKey(now), [now]);
+  const rollingDates = useMemo(() => rollingWindowDates(now, 7), [now]);
+  const [selectedDate, setSelectedDate] = useState<string>(todayDateKey);
+  const [timeOfDayFilter, setTimeOfDayFilter] = useState<TimeOfDay | "all">("all");
   const [discoveryFreeOnly, setDiscoveryFreeOnly] = useState(false);
+  const discoveryCarouselScroll = useTrailingScrollFade<HTMLDivElement>();
+  const dateStripScroll = useTrailingScrollFade<HTMLDivElement>();
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   // Transient "Copied" confirmation on the Share action when the Web Share
   // API isn't available (most desktop browsers) — reverts on its own, and
@@ -321,7 +394,7 @@ export default function SearchSurface() {
       return;
     }
     setResultsPulse((v) => (v === 0 ? 1 : 0));
-  }, [density, activeFilter, timeWindow]);
+  }, [density, activeFilter, selectedDate, timeOfDayFilter]);
 
   const [discoveryPulse, setDiscoveryPulse] = useState<0 | 1>(0);
   const isFirstDiscoveryRender = useRef(true);
@@ -351,7 +424,10 @@ export default function SearchSurface() {
   }, [surfaceState]);
 
   const discoveryHighlights = useMemo(() => {
-    let pool = sessions.filter((s) => s.day === "today");
+    // Exact date match, not the legacy `day` field — Discovery intentionally
+    // stays a today-only feed even though `sessions` itself now spans the
+    // full rolling 7-day window Results uses.
+    let pool = sessions.filter((s) => s.date === todayDateKey);
     if (persistentLocation) pool = pool.filter((s) => sessionMatchesLocation(s, persistentLocation));
     if (discoveryFreeOnly) return pool.filter((s) => s.price === "Free");
 
@@ -377,7 +453,7 @@ export default function SearchSurface() {
       if (!diverse.includes(s)) diverse.push(s);
     }
     return diverse;
-  }, [sessions, discoveryFreeOnly, persistentLocation]);
+  }, [sessions, discoveryFreeOnly, persistentLocation, todayDateKey]);
 
   const parsed = useMemo(() => parseQuery(committedQuery, sessions), [committedQuery, sessions]);
   const matchedActivities = parsed.activities;
@@ -399,19 +475,29 @@ export default function SearchSurface() {
     [baseResults],
   );
 
-  const resultsFiltered = useMemo(() => {
+  // The date-scoped pool before the Time of Day refinement is applied — used
+  // both to produce the final filtered results and to compute which time-of-
+  // day chips are actually worth offering (see timeOfDayOptions below).
+  const resultsForSelectedDate = useMemo(() => {
     return baseResults.filter((s) => {
-      // Allowlist, not a blocklist: `day` is now optional and undefined for
-      // anything beyond tomorrow (see lib/dropin/types.ts), so excluding
-      // only "tomorrow" would let a wider future data window leak into the
-      // "Today" view. The API route currently only ever requests two days,
-      // so `day` is always "today" or "tomorrow" in practice — this is a
-      // forward-compatibility guard, not a behaviour change.
-      if (timeWindow === "today" && s.day !== "today") return false;
+      if (s.date !== selectedDate) return false;
       if (activeFilter !== "All" && s.activity !== activeFilter) return false;
       return true;
     });
-  }, [baseResults, activeFilter, timeWindow]);
+  }, [baseResults, activeFilter, selectedDate]);
+
+  // Only offer a time-of-day chip when it would actually return something —
+  // same "never a dead-end filter" principle already applied to the activity
+  // chips above (filterChipActivities).
+  const timeOfDayOptions = useMemo(() => {
+    const present = new Set(resultsForSelectedDate.map((s) => timeOfDayBucket(s.startMinutes)));
+    return (["morning", "afternoon", "evening"] as const).filter((t) => present.has(t));
+  }, [resultsForSelectedDate]);
+
+  const resultsFiltered = useMemo(() => {
+    if (timeOfDayFilter === "all") return resultsForSelectedDate;
+    return resultsForSelectedDate.filter((s) => timeOfDayBucket(s.startMinutes) === timeOfDayFilter);
+  }, [resultsForSelectedDate, timeOfDayFilter]);
 
   // A single, consistently-cased noun for whatever activity scope is
   // currently active — used everywhere the Results state needs to name it
@@ -437,37 +523,47 @@ export default function SearchSurface() {
     return raw ? daysAgoLabel(raw) : undefined;
   }, [sessions]);
 
-  // Priority: Starting Soon (urgent) > Starting Today (before 5pm) > Later
-  // Today (5pm+) > Tomorrow — so the most time-sensitive activities need
-  // zero scanning effort to find. Sorted by start time within each group —
-  // real data (startMinutes, computed from the actual schedule). Distance
-  // would be the requested secondary sort key, but no session has one:
-  // Toronto Open Data has no coordinates and geolocation isn't built yet
-  // (Session.distanceKm is undefined for every real session), so sorting by
-  // it would mean sorting by nothing — left out rather than faked. A fifth
-  // "Remaining Week" group isn't included for the same reason flagged last
-  // sprint: Session.day only ever distinguishes today/tomorrow, so there's
-  // no real "day 3-7" bucket to group by without fabricating one.
-  const resultsByDay = useMemo(() => {
-    const byStartTime = (list: Session[]) => [...list].sort((a, b) => a.startMinutes - b.startMinutes);
-    const today = resultsFiltered.filter((s) => s.day === "today");
+  // Grouping depends on which date is selected, not a fixed shape: urgency
+  // language (Starting soon / Starting today / Later today) is only ever
+  // meaningful for the currently-selected date being *today* — isUrgent
+  // requires being within an hour of the real current time, so nothing on a
+  // future date can structurally ever be "starting soon." Future dates use
+  // neutral Morning/Afternoon/Evening grouping instead. When the Time of Day
+  // chip has already narrowed to one bucket, regrouping by that same
+  // dimension would just repeat the active chip as a redundant heading, so
+  // that case collapses to one flat, chronologically-sorted list instead.
+  const resultsGrouped = useMemo(() => {
+    const sorted = [...resultsFiltered].sort(compareChronologically);
+    const isTodaySelected = isToday(selectedDate, now);
 
-    const groups: Array<{ key: ResultGroup; sessions: Session[] }> = [
-      { key: "startingSoon", sessions: byStartTime(today.filter((s) => s.urgent)) },
-      {
-        key: "startingToday",
-        sessions: byStartTime(today.filter((s) => !s.urgent && s.startMinutes < LATER_TODAY_THRESHOLD_MINUTES)),
-      },
-      {
-        key: "laterToday",
-        sessions: byStartTime(today.filter((s) => !s.urgent && s.startMinutes >= LATER_TODAY_THRESHOLD_MINUTES)),
-      },
-    ];
-    if (timeWindow === "week") {
-      groups.push({ key: "tomorrow", sessions: byStartTime(resultsFiltered.filter((s) => s.day === "tomorrow")) });
+    if (isTodaySelected) {
+      const groups = [
+        { key: "startingSoon", label: "Starting soon", sessions: sorted.filter((s) => s.urgent) },
+        {
+          key: "startingToday",
+          label: "Starting today",
+          sessions: sorted.filter((s) => !s.urgent && s.startMinutes < LATER_TODAY_THRESHOLD_MINUTES),
+        },
+        {
+          key: "laterToday",
+          label: "Later today",
+          sessions: sorted.filter((s) => !s.urgent && s.startMinutes >= LATER_TODAY_THRESHOLD_MINUTES),
+        },
+      ];
+      return groups.filter((g) => g.sessions.length > 0);
     }
+
+    if (timeOfDayFilter !== "all") {
+      return sorted.length > 0 ? [{ key: "all", label: "", sessions: sorted }] : [];
+    }
+
+    const groups = (["morning", "afternoon", "evening"] as const).map((t) => ({
+      key: t,
+      label: TIME_OF_DAY_LABELS[t],
+      sessions: sorted.filter((s) => timeOfDayBucket(s.startMinutes) === t),
+    }));
     return groups.filter((g) => g.sessions.length > 0);
-  }, [resultsFiltered, timeWindow]);
+  }, [resultsFiltered, selectedDate, timeOfDayFilter, now]);
 
   const isUnavailableMunicipality = effectiveLocation?.type === "municipality" && effectiveLocation.status === "not-yet-available";
 
@@ -480,15 +576,45 @@ export default function SearchSurface() {
     if (effectiveLocation?.type === "municipality" && effectiveLocation.status === "not-yet-available") {
       return `DropIn doesn't cover ${effectiveLocation.label} yet — here's what's available in Toronto instead.`;
     }
-    const activityPart = activityDisplayLabel ? `${activityDisplayLabel} activities` : "activities";
-    const scope = timeWindow === "week" ? "this week" : "today";
-    return effectiveLocation
-      ? `No ${activityPart} found in ${effectiveLocation.label} ${scope}.`
-      : `No ${activityPart} found ${scope}.`;
-  }, [activityDisplayLabel, effectiveLocation, timeWindow]);
 
-  // Only ever suggests activities that actually have real sessions in the
-  // current location/time scope — never a dead-end suggestion.
+    // Composes activity + time-of-day into one natural subject rather than
+    // stacking separate clauses — "Badminton activities in the evening",
+    // "evening activities", or just "Badminton activities" depending on
+    // which refinements are actually active.
+    let subject: string;
+    if (activityDisplayLabel && timeOfDayFilter !== "all") {
+      subject = `${activityDisplayLabel} activities in the ${timeOfDayFilter}`;
+    } else if (activityDisplayLabel) {
+      subject = `${activityDisplayLabel} activities`;
+    } else if (timeOfDayFilter !== "all") {
+      subject = `${timeOfDayFilter} activities`;
+    } else {
+      subject = "activities";
+    }
+
+    const dateWord = isToday(selectedDate, now)
+      ? "today"
+      : isTomorrow(selectedDate, now)
+        ? "tomorrow"
+        : `on ${weekdayLabel(selectedDate)}`;
+
+    return effectiveLocation
+      ? `No ${subject} found in ${effectiveLocation.label} ${dateWord}.`
+      : `No ${subject} found ${dateWord}.`;
+  }, [activityDisplayLabel, effectiveLocation, timeOfDayFilter, selectedDate, now]);
+
+  // The nearest other date (within the rolling window) that has at least one
+  // real session for the current activity+location scope — only offered
+  // when neither an activity nor a time-of-day filter is the active
+  // constraint, since those get their own targeted "clear" actions that
+  // resolve the emptiness without changing what date is being looked at.
+  const nextAvailableDate = useMemo(() => {
+    if (activeFilter !== "All" || timeOfDayFilter !== "all") return undefined;
+    return rollingDates.find((d) => d !== selectedDate && baseResults.some((s) => s.date === d));
+  }, [baseResults, rollingDates, selectedDate, activeFilter, timeOfDayFilter]);
+
+  // Only ever suggests activities that actually have real sessions on the
+  // currently selected date — never a dead-end suggestion.
   const alternateActivitySuggestions = useMemo(() => {
     const candidates = [...SHORTCUTS, "Table Tennis"].filter((a) => !matchedActivities.includes(a));
     return candidates
@@ -497,19 +623,20 @@ export default function SearchSurface() {
         return sessions.some(
           (s) =>
             group.includes(s.activity) &&
-            (timeWindow === "week" || s.day === "today") &&
+            s.date === selectedDate &&
             (!effectiveLocation || sessionMatchesLocation(s, effectiveLocation)),
         );
       })
       .slice(0, 2);
-  }, [sessions, matchedActivities, effectiveLocation, timeWindow]);
+  }, [sessions, matchedActivities, effectiveLocation, selectedDate]);
 
   function commitQuery(q: string) {
     const trimmed = q.trim();
     setQuery(q);
     setSuggestionsOpen(false);
     setActiveFilter("All");
-    setTimeWindow("today");
+    setSelectedDate(todayDateKey);
+    setTimeOfDayFilter("all");
 
     const result = parseQuery(trimmed, sessions);
 
@@ -573,7 +700,7 @@ export default function SearchSurface() {
   // "Copied" confirmation on the button itself) everywhere else — no new
   // UI, just a real action behind a button that previously did nothing.
   async function handleShare(s: Session) {
-    const summary = [`${s.activity} — ${s.centre}`, timeLabel(s), s.officialUrl].filter(Boolean).join("\n");
+    const summary = [`${s.activity} — ${s.centre}`, timeLabel(s, now), s.officialUrl].filter(Boolean).join("\n");
 
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
@@ -606,8 +733,8 @@ export default function SearchSurface() {
   // A quiet time anchor, not a heading — reassures users the results below
   // are current without asking them to think about it.
   const todayLabel = useMemo(
-    () => new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }),
-    [],
+    () => now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }),
+    [now],
   );
 
   return (
@@ -719,37 +846,48 @@ export default function SearchSurface() {
 
             <p className="mb-4 text-sm font-medium text-text-secondary">What would you like to do today?</p>
 
-            {/* No wrapper — chips sit directly on the page background, left
-                edge lining up naturally with the search bar and heading
-                below since none of them add their own padding. */}
-            <div className="mb-6 flex items-center gap-2 overflow-x-auto">
-              {SHORTCUTS.map((chip) => {
-                const Icon = ACTIVITY_ICONS[chip];
-                return (
-                  <button
-                    key={chip}
-                    type="button"
-                    onClick={() => commitQuery(chip)}
-                    className="group flex flex-shrink-0 items-center gap-1.5 rounded-full border border-border bg-white px-3.5 py-2 text-sm font-medium text-text-primary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95"
-                  >
-                    <Icon className="h-4 w-4 text-text-secondary transition-colors duration-150 ease-out group-hover:text-sage-text" />
-                    {chip}
-                  </button>
-                );
-              })}
-              <span className="my-1 w-px flex-shrink-0 self-stretch bg-border" aria-hidden="true" />
-              <button
-                type="button"
-                aria-pressed={discoveryFreeOnly}
-                onClick={() => setDiscoveryFreeOnly((v) => !v)}
-                className={`flex-shrink-0 rounded-full border px-3.5 py-2 text-sm transition-all duration-[170ms] ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95 ${
-                  discoveryFreeOnly
-                    ? "border-transparent bg-sage/15 font-semibold text-sage-text"
-                    : "border-border bg-white font-medium text-text-secondary hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)]"
-                }`}
-              >
-                Free
-              </button>
+            {/* No wrapper padding — chips sit directly on the page
+                background, left edge lining up naturally with the search bar
+                and heading below. The relative/absolute pair around the
+                scroll row is purely a trailing-fade affordance: it only
+                appears when there's real content past the edge, so it never
+                claims there's more to scroll when there isn't. */}
+            <div className="relative mb-6">
+              <div ref={discoveryCarouselScroll.ref} className="flex items-center gap-2 overflow-x-auto">
+                {SHORTCUTS.map((chip) => {
+                  const Icon = ACTIVITY_ICONS[chip];
+                  return (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => commitQuery(chip)}
+                      className="group flex flex-shrink-0 items-center gap-1.5 rounded-full border border-border bg-white px-3.5 py-2 text-sm font-medium text-text-primary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95"
+                    >
+                      <Icon className="h-4 w-4 text-text-secondary transition-colors duration-150 ease-out group-hover:text-sage-text" />
+                      {chip}
+                    </button>
+                  );
+                })}
+                <span className="my-1 w-px flex-shrink-0 self-stretch bg-border" aria-hidden="true" />
+                <button
+                  type="button"
+                  aria-pressed={discoveryFreeOnly}
+                  onClick={() => setDiscoveryFreeOnly((v) => !v)}
+                  className={`flex-shrink-0 rounded-full border px-3.5 py-2 text-sm transition-all duration-[170ms] ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95 ${
+                    discoveryFreeOnly
+                      ? "border-transparent bg-sage/15 font-semibold text-sage-text"
+                      : "border-border bg-white font-medium text-text-secondary hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)]"
+                  }`}
+                >
+                  Free
+                </button>
+              </div>
+              {discoveryCarouselScroll.showFade && (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-r from-transparent to-surface"
+                />
+              )}
             </div>
 
             <h2 className="mb-3 text-base font-semibold text-sage-text">
@@ -773,7 +911,7 @@ export default function SearchSurface() {
               ) : (
                 <div className="space-y-4">
                   {discoveryHighlights.map((s, i) => (
-                    <SessionCard key={s.id} s={s} onSelect={setSelectedSession} delayMs={i * 30} />
+                    <SessionCard key={s.id} s={s} now={now} onSelect={setSelectedSession} delayMs={i * 30} />
                   ))}
                 </div>
               )}
@@ -789,6 +927,64 @@ export default function SearchSurface() {
             <p className="mb-2 text-sm text-text-secondary">
               {activityDisplayLabel ? `${activityDisplayLabel} activities` : `Activities in ${effectiveLocation?.label ?? committedQuery}`}
             </p>
+
+            {/* Date navigator — deliberately NOT styled like the pill filter
+                chips below it. Filters are bordered pills (a "pick one or
+                more categories" vocabulary); this reads as calendar/week
+                navigation instead: no border or fill on unselected dates,
+                a stacked weekday-context + calendar-date pair per item, and
+                a selected state built from color + a thin underline
+                indicator rather than a filled pill, so "when" and "what"
+                don't look like the same control system stacked twice. */}
+            <div className="relative mb-4">
+              <div
+                ref={dateStripScroll.ref}
+                className="flex gap-0.5 overflow-x-auto pb-1"
+                role="group"
+                aria-label="Select a date"
+              >
+                {rollingDates.map((d) => {
+                  const active = d === selectedDate;
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      aria-pressed={active}
+                      aria-label={fullDateLabel(d, now)}
+                      onClick={() => setSelectedDate(d)}
+                      className="group flex flex-shrink-0 flex-col items-center gap-1 rounded-lg px-3 pb-1.5 pt-2 transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95"
+                    >
+                      <span className={`text-xs font-medium ${active ? "text-sage-text" : "text-text-secondary group-hover:text-sage-text"}`}>
+                        {dateStripContextLabel(d, now)}
+                      </span>
+                      <span className={`text-sm font-semibold ${active ? "text-sage-text" : "text-text-primary group-hover:text-sage-text"}`}>
+                        {dateStripDateLabel(d)}
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        className={`h-0.5 w-6 rounded-full transition-colors duration-150 ease-out ${active ? "bg-sage-text" : "bg-transparent"}`}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+              {dateStripScroll.showFade && (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-r from-transparent to-surface"
+                />
+              )}
+            </div>
+
+            {/* Refinements — activity subtype and time-of-day chips share one
+                scrollable row (separated by the same divider treatment
+                Discovery already uses for its own Free toggle) rather than
+                each claiming a full row, so adding Time of Day doesn't push
+                the control cluster to four equally-prominent rows before the
+                first result. Time of Day only appears once there's a real
+                choice to make (more than one bucket present for the current
+                date+activity scope) and behaves as a toggle, like Discovery's
+                Free chip — tapping the active one again clears it. */}
             <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
               {["All", ...filterChipActivities].map((f) => {
                 const active = activeFilter === f;
@@ -808,24 +1004,29 @@ export default function SearchSurface() {
                   </button>
                 );
               })}
-            </div>
-
-            <div className="mb-4 flex items-center gap-1.5 text-sm text-text-secondary">
-              <button
-                type="button"
-                onClick={() => setTimeWindow("today")}
-                className={`transition-colors duration-150 ease-out ${timeWindow === "today" ? "font-semibold text-sage-text underline underline-offset-2" : "hover:text-sage-text"}`}
-              >
-                Today
-              </button>
-              /
-              <button
-                type="button"
-                onClick={() => setTimeWindow("week")}
-                className={`transition-colors duration-150 ease-out ${timeWindow === "week" ? "font-semibold text-sage-text underline underline-offset-2" : "hover:text-sage-text"}`}
-              >
-                This Week
-              </button>
+              {timeOfDayOptions.length > 1 && (
+                <>
+                  <span className="my-1 w-px flex-shrink-0 self-stretch bg-border" aria-hidden="true" />
+                  {timeOfDayOptions.map((t) => {
+                    const active = timeOfDayFilter === t;
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => setTimeOfDayFilter(active ? "all" : t)}
+                        className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-all duration-[170ms] ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95 ${
+                          active
+                            ? "border-transparent bg-sage/15 font-semibold text-sage-text"
+                            : "border-border bg-white font-medium text-text-secondary hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)]"
+                        }`}
+                      >
+                        {TIME_OF_DAY_LABELS[t]}
+                      </button>
+                    );
+                  })}
+                </>
+              )}
             </div>
 
             <div className="flex items-center justify-between border-t border-border/70 py-4 text-xs text-text-secondary">
@@ -881,13 +1082,31 @@ export default function SearchSurface() {
                       </button>
                     ) : (
                       <>
-                        {timeWindow === "today" && (
+                        {activeFilter !== "All" && (
                           <button
                             type="button"
-                            onClick={() => setTimeWindow("week")}
+                            onClick={() => setActiveFilter("All")}
                             className="rounded-full border border-border bg-white px-3.5 py-1.5 text-sm font-medium text-text-secondary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] active:scale-95"
                           >
-                            This week
+                            Clear {activeFilter} filter
+                          </button>
+                        )}
+                        {timeOfDayFilter !== "all" && (
+                          <button
+                            type="button"
+                            onClick={() => setTimeOfDayFilter("all")}
+                            className="rounded-full border border-border bg-white px-3.5 py-1.5 text-sm font-medium text-text-secondary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] active:scale-95"
+                          >
+                            Clear time filter
+                          </button>
+                        )}
+                        {nextAvailableDate && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDate(nextAvailableDate)}
+                            className="rounded-full border border-border bg-white px-3.5 py-1.5 text-sm font-medium text-text-secondary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] active:scale-95"
+                          >
+                            Try {shortDateLabel(nextAvailableDate, now)}
                           </button>
                         )}
                         {effectiveLocation && (
@@ -917,12 +1136,12 @@ export default function SearchSurface() {
                   </div>
                 </div>
               ) : (
-                resultsByDay.map((d) => (
+                resultsGrouped.map((d) => (
                   <div key={d.key}>
-                    <h2 className="mb-3 text-base font-semibold text-sage-text">{RESULT_GROUP_LABELS[d.key]}</h2>
+                    {d.label && <h2 className="mb-3 text-base font-semibold text-sage-text">{d.label}</h2>}
                     <div className="space-y-4">
                       {d.sessions.map((s, i) => (
-                        <SessionCard key={s.id} s={s} onSelect={setSelectedSession} density={density} delayMs={i * 30} />
+                        <SessionCard key={s.id} s={s} now={now} onSelect={setSelectedSession} density={density} delayMs={i * 30} />
                       ))}
                     </div>
                   </div>
@@ -976,7 +1195,7 @@ export default function SearchSurface() {
               }`}
             >
               {selectedSession.urgent && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-sage-text" aria-hidden="true" />}
-              {timeLabel(selectedSession)}
+              {timeLabel(selectedSession, now)}
             </p>
 
             {/* Location: centre — the anchor fact, a shade darker than the
