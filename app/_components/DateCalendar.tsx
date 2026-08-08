@@ -79,13 +79,24 @@ export function DateCalendar({
   const cells = buildMonthGrid(view.year, view.month);
 
   return (
-    <Sheet open={open} onClose={onClose} titleId="date-calendar-title" desktopVariant="modal" narrow>
-      <h2 id="date-calendar-title" className="flex items-center gap-2 text-[18px] font-bold text-text-primary">
-        <CalendarIcon className="h-5 w-5 flex-shrink-0 text-text-secondary" />
-        Choose a date
-      </h2>
-
-      <div className="mt-3 flex items-center justify-between">
+    <Sheet
+      open={open}
+      onClose={onClose}
+      titleId="date-calendar-title"
+      desktopVariant="modal"
+      narrow
+      // Puts the title on the same row as Close instead of on its own line
+      // below an otherwise-empty close-button row — that extra row was
+      // both the misalignment (title left, Close right, but on different
+      // lines) and most of the excess space above the title.
+      titleSlot={
+        <h2 id="date-calendar-title" className="flex min-w-0 items-center gap-2 text-[18px] font-bold text-text-primary">
+          <CalendarIcon className="h-5 w-5 flex-shrink-0 text-text-secondary" />
+          Choose a date
+        </h2>
+      }
+    >
+      <div className="flex items-center justify-between">
         <button
           type="button"
           disabled={!canGoPrev}

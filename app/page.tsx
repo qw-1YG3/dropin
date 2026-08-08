@@ -1043,30 +1043,56 @@ export default function SearchSurface() {
           <section
             className={`pb-10 ${surfaceExiting ? "motion-safe:animate-[fadeOut_100ms_ease-out_both]" : "motion-safe:animate-[cardIn_220ms_ease-out_both]"}`}
           >
-            <p className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm text-text-secondary">
-              <span>
-                {activityDisplayLabel
-                  ? `${activityDisplayLabel} Activities`
-                  : effectiveLocation
-                    ? `Activities in ${effectiveLocation.label}`
-                    : committedQuery
-                      ? `Activities in ${committedQuery}`
-                      : "All Activities"}
-              </span>
-              {/* The activity name above is context, not a filter — this is
-                  the one explicit way back to the unscoped set, so a single-
-                  activity search never becomes a dead end. Only meaningful
-                  when a real activity constraint exists to remove. */}
-              {matchedActivities.length > 0 && (
-                <button
-                  type="button"
-                  onClick={exploreAllActivities}
-                  className="text-sage-text underline underline-offset-2 transition-colors duration-150 ease-out hover:text-sage-text/80"
-                >
-                  Explore all activities
-                </button>
-              )}
-            </p>
+            {/* No standalone "{Activity} Activities" heading here on purpose
+                — it used to read as a section title implying everything
+                below belonged under it, when the actual next content was
+                Date, then Time, then Activity again. The selected activity
+                is already communicated by the query, the active chip below,
+                and the result cards themselves; its one remaining job —
+                naming what's currently showing — now lives in the Results
+                Summary line instead (see the count line below the
+                refinements), and its "remove this constraint" job is now
+                the Activity row's own "All" option (see exploreAllActivities
+                usage below) rather than a separate link. */}
+
+            {/* WHEN group — Date + Time-of-day read as one cluster via a
+                shared quiet utility label (reusing the exact text-xs
+                font-medium text-text-secondary treatment the date strip's
+                own weekday line already uses, not a new style) and tighter
+                internal spacing than what separates this group from
+                Activity below. Deliberately not a heading — smaller,
+                muted, never sage — so it stays subordinate to real content
+                headings like a result group's "Morning". mt-2 restores the
+                "comfortable separation" from the search bar that the
+                removed context heading used to contribute incidentally via
+                its own margin. */}
+            <div className="mt-2 mb-1.5 flex items-center justify-between">
+              {/* text-text-primary, not -secondary — the same "the more
+                  structural of two stacked lines gets the darker token"
+                  precedent the date strip's own weekday/date pair already
+                  uses in this file. Weight/size stay exactly as before;
+                  the one-token color shift alone is enough to read as
+                  clearly more intentional than the plain-secondary
+                  metadata line below, without approaching the sage/
+                  semibold weight of a real result-group heading. */}
+              <span className="text-xs font-medium text-text-primary">When</span>
+              {/* No border/fill — same quiet icon-button treatment the
+                  header's own Info button already uses. Now sits beside the
+                  "When" label rather than inline with the dates themselves
+                  — it's the entry point to the full schedule, not one of
+                  the date options, so it shouldn't visually resemble one.
+                  Still a plain sibling outside the scrollable strip, so it
+                  can never scroll out of view with the date content on
+                  mobile. */}
+              <button
+                type="button"
+                onClick={() => setCalendarOpen(true)}
+                aria-label="Choose another date"
+                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-text-secondary transition-all duration-150 ease-out hover:bg-hover-surface hover:text-sage-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95"
+              >
+                <CalendarIcon className="h-4 w-4" />
+              </button>
+            </div>
 
             {/* Date navigator — deliberately NOT styled like the pill filter
                 chips below it. Filters are bordered pills (a "pick one or
@@ -1075,71 +1101,51 @@ export default function SearchSurface() {
                 a stacked weekday-context + calendar-date pair per item, and
                 a selected state built from color + a thin underline
                 indicator rather than a filled pill, so "when" and "what"
-                don't look like the same control system stacked twice. */}
-            <div className="mb-4 flex items-center gap-1">
-              <div className="relative min-w-0 flex-1">
-                {/* -ml-3 compensates for each date button's own px-3 text
-                    inset — unlike the bordered time-of-day/activity rows
-                    below, these buttons have no visible border to mark a
-                    box edge, so the bare weekday/date text is the first
-                    thing a reader actually sees. Without this, that text
-                    would sit 12px right of the heading above and the
-                    bordered rows below, breaking the shared left edge the
-                    refinement block is meant to read from. Pulls the
-                    button's own hit target left by the same amount, not
-                    just the text — harmless, since nothing marks that box
-                    visually until hover/focus. */}
-                <div
-                  ref={dateStripScroll.ref}
-                  className="-ml-3 flex gap-0.5 overflow-x-auto pb-1"
-                  role="group"
-                  aria-label="Select a date"
-                >
-                  {rollingDates.map((d) => {
-                    const active = d === selectedDate;
-                    return (
-                      <button
-                        key={d}
-                        type="button"
-                        aria-pressed={active}
-                        aria-label={fullDateLabel(d, now)}
-                        onClick={() => setSelectedDate(d)}
-                        className="group flex flex-shrink-0 flex-col items-center gap-1 rounded-lg px-3 pb-1.5 pt-2 transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95"
-                      >
-                        <span className={`text-xs font-medium ${active ? "text-sage-text" : "text-text-secondary group-hover:text-sage-text"}`}>
-                          {dateStripContextLabel(d, now)}
-                        </span>
-                        <span className={`text-sm font-semibold ${active ? "text-sage-text" : "text-text-primary group-hover:text-sage-text"}`}>
-                          {dateStripDateLabel(d)}
-                        </span>
-                        <span
-                          aria-hidden="true"
-                          className={`h-0.5 w-6 rounded-full transition-colors duration-150 ease-out ${active ? "bg-sage-text" : "bg-transparent"}`}
-                        />
-                      </button>
-                    );
-                  })}
-                </div>
-                {dateStripScroll.showFade && (
-                  <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-r from-transparent to-surface"
-                  />
-                )}
-              </div>
-              {/* Pinned outside the scrollable strip, never part of its
-                  scroll content — the strip is quick navigation within a
-                  visible window; this is the secondary "the schedule goes
-                  further than these seven days" affordance, so it needs to
-                  stay reachable regardless of scroll position. */}
-              <button
-                type="button"
-                onClick={() => setCalendarOpen(true)}
-                aria-label="Choose another date"
-                className="flex h-9 w-9 flex-shrink-0 items-center justify-center self-start rounded-full border border-border/70 bg-white text-text-secondary transition-all duration-150 ease-out hover:bg-hover-surface hover:text-sage-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95"
+                don't look like the same control system stacked twice.
+                mb-3 (not mt on Time below) is the Date→Time gap — deliberately
+                smaller than the Time→Activity gap below, so Date+Time read
+                as one group. When Time doesn't render at all, this same
+                margin collapses with the Activity label's own larger mt-6
+                instead, so the group boundary still lands in the right
+                place regardless of which row happens to be last. */}
+            <div className="relative mb-3">
+              <div
+                ref={dateStripScroll.ref}
+                className="flex gap-0.5 overflow-x-auto pb-1"
+                role="group"
+                aria-label="Select a date"
               >
-                <CalendarIcon className="h-4 w-4" />
-              </button>
+                {rollingDates.map((d) => {
+                  const active = d === selectedDate;
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      aria-pressed={active}
+                      aria-label={fullDateLabel(d, now)}
+                      onClick={() => setSelectedDate(d)}
+                      className="group flex flex-shrink-0 flex-col items-center gap-1 rounded-lg px-3 pb-1.5 pt-2 transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95"
+                    >
+                      <span className={`text-xs font-medium ${active ? "text-sage-text" : "text-text-secondary group-hover:text-sage-text"}`}>
+                        {dateStripContextLabel(d, now)}
+                      </span>
+                      <span className={`text-sm font-semibold ${active ? "text-sage-text" : "text-text-primary group-hover:text-sage-text"}`}>
+                        {dateStripDateLabel(d)}
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        className={`h-0.5 w-6 rounded-full transition-colors duration-150 ease-out ${active ? "bg-sage-text" : "bg-transparent"}`}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+              {dateStripScroll.showFade && (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-r from-transparent to-surface"
+                />
+              )}
             </div>
 
             {/* Time of day — a single segmented control, not a row of
@@ -1159,10 +1165,13 @@ export default function SearchSurface() {
                 with activity subtype chips either — see the row below.
                 Only rendered once there's a real choice to make, and each
                 segment still behaves as a toggle, like Discovery's Free
-                chip — tapping the active one again clears it. */}
+                chip — tapping the active one again clears it. No bottom
+                margin of its own on purpose — the Activity label's mt-6
+                below owns the larger group-separating gap regardless of
+                whether this control is present. */}
             {timeOfDayOptions.length > 1 && (
               <div
-                className="mb-2 inline-flex rounded-lg border border-border/70 bg-white p-0.5"
+                className="inline-flex rounded-lg border border-border/70 bg-white p-0.5"
                 role="group"
                 aria-label="Time of day"
               >
@@ -1185,43 +1194,76 @@ export default function SearchSurface() {
               </div>
             )}
 
-            {/* Activity subtype — a second, independent row below time of
-                day, only rendered when a genuine choice exists. A single-
-                activity search already says "X activities" in the context
-                line above, so repeating it as "All | X" would be a
-                redundant filter that visibly does nothing when tapped. Can
-                run long (every Swimming variant, say), so it gets its own
-                scroll container and trailing fade rather than ever
-                competing with time-of-day for horizontal space. */}
-            {filterChipActivities.length > 1 && (
-              <div className="relative mb-3">
-                <div ref={subtypeScroll.ref} className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Activity subtype">
-                  {["All", ...filterChipActivities].map((f) => {
-                    const active = activeFilter === f;
-                    return (
-                      <button
-                        key={f}
-                        type="button"
-                        aria-pressed={active}
-                        onClick={() => setActiveFilter(f)}
-                        className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-all duration-[170ms] ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95 ${
-                          active
-                            ? "border-transparent bg-sage/15 font-semibold text-sage-text"
-                            : "border-border bg-white font-medium text-text-secondary hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)]"
-                        }`}
-                      >
-                        {f}
-                      </button>
-                    );
-                  })}
+            {/* ACTIVITY group — its own quiet utility label (same treatment
+                as "When", singular "Activity" since this names the
+                filtering dimension, not the result count) plus the subtype
+                row. mt-6 is the deliberately larger gap that separates the
+                When group above from this one — collapses with whichever
+                row above happens to be last (Date or Time), so the
+                boundary reads correctly either way. Label and row are
+                wrapped in the same condition so "Activity" never renders
+                with nothing beneath it. Now the row's own "All" carries the
+                job the removed context heading's "Explore all activities"
+                link used to do, so it renders whenever a real search-driven
+                activity constraint exists (matchedActivities.length > 0)
+                even for an activity with no subtypes of its own (Badminton,
+                Pickleball) — otherwise there'd be no way to answer "what do
+                I want to do?" with anything other than the one thing
+                already searched. "All" is never cosmetic: when real
+                subtypes exist (e.g. Swimming's Lane/Leisure variants) it
+                narrows within that matched family, same as before; when
+                there's no real family to narrow within, it falls through to
+                exploreAllActivities so it still visibly does something
+                rather than silently no-op. Can run long (every Swimming
+                variant, say), so it gets its own scroll container and
+                trailing fade rather than ever competing with time-of-day
+                for horizontal space. */}
+            {(matchedActivities.length > 0 || filterChipActivities.length > 1) && (
+              <>
+                {/* Same treatment as "When" above — see its comment. mb-4
+                    here, not mb-1.5: "When"'s own label-to-content gap
+                    reads as 16px in practice because its row is stretched
+                    taller by the calendar button sitting beside it
+                    (items-center centers the text within that taller row,
+                    adding invisible space below the text before the row's
+                    own margin even starts) — a plain single-line span like
+                    this one has no such hidden height, so it needs a
+                    larger explicit margin to land on the same visible
+                    16px gap, confirmed by measuring both in the browser. */}
+                <span className="mt-6 mb-4 block text-xs font-medium text-text-primary">Activity</span>
+                <div className="relative mb-3">
+                  <div ref={subtypeScroll.ref} className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Activity subtype">
+                    {["All", ...filterChipActivities].map((f) => {
+                      const active = activeFilter === f;
+                      return (
+                        <button
+                          key={f}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => {
+                            if (f !== "All") return setActiveFilter(f);
+                            if (filterChipActivities.length > 1) return setActiveFilter("All");
+                            exploreAllActivities();
+                          }}
+                          className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-all duration-[170ms] ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95 ${
+                            active
+                              ? "border-transparent bg-sage/15 font-semibold text-sage-text"
+                              : "border-border bg-white font-medium text-text-secondary hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)]"
+                          }`}
+                        >
+                          {f}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {subtypeScroll.showFade && (
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-r from-transparent to-surface"
+                    />
+                  )}
                 </div>
-                {subtypeScroll.showFade && (
-                  <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-r from-transparent to-surface"
-                  />
-                )}
-              </div>
+              </>
             )}
 
             {/* mt-3 here, not a bigger mb- on whichever refinement row
@@ -1231,7 +1273,10 @@ export default function SearchSurface() {
                 apart from results" holds true regardless of which row is
                 actually last, without needing per-case spacing logic. */}
             <div className="mt-3 flex items-center justify-between border-t border-border/70 py-4 text-xs text-text-secondary">
-              <span>{`${resultsFiltered.length} ${resultsFiltered.length === 1 ? "activity" : "activities"} ${lastUpdatedLabel ? ` · ${lastUpdatedLabel}` : ""}`}</span>
+              {/* Now the one place the active activity is actually named —
+                  absorbing the job the removed standalone heading used to
+                  do, rather than duplicating it above the filters. */}
+              <span>{`${resultsFiltered.length} ${activityDisplayLabel ? `${activityDisplayLabel} ` : ""}${resultsFiltered.length === 1 ? "activity" : "activities"}${lastUpdatedLabel ? ` · ${lastUpdatedLabel}` : ""}`}</span>
               <div className="flex flex-shrink-0 items-center gap-1" role="group" aria-label="List density">
                 <button
                   type="button"
@@ -1527,10 +1572,16 @@ export default function SearchSurface() {
         }}
         titleId="info-sheet-title"
         desktopVariant="modal"
+        // Same fix as the date calendar's title: puts "About DropIn" on the
+        // same row as Close instead of on its own line below an otherwise-
+        // empty close-button row, which was both the misalignment and most
+        // of the excess space above the title.
+        titleSlot={
+          <h2 id="info-sheet-title" className="text-[18px] font-bold text-text-primary">
+            About DropIn
+          </h2>
+        }
       >
-        <h2 id="info-sheet-title" className="text-[18px] font-bold text-text-primary">
-          About DropIn
-        </h2>
         <p className="mt-2 text-sm text-text-secondary">
           DropIn makes it easier to find drop-in activities happening at community centres near you.
         </p>
