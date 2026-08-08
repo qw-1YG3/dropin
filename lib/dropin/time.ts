@@ -21,13 +21,13 @@ export function toDateKey(d: Date): string {
 // has no explicit IANA timezone handling (no Temporal/date-fns-tz), so a
 // server running in a different zone would compute the wrong "today." See
 // the Toronto adapter's own notes for how this is currently mitigated.
-function addDays(d: Date, days: number): Date {
+export function addDays(d: Date, days: number): Date {
   const copy = new Date(d);
   copy.setDate(copy.getDate() + days);
   return copy;
 }
 
-function localMidnight(dateKey: string): Date {
+export function localMidnight(dateKey: string): Date {
   return new Date(`${dateKey}T00:00:00`);
 }
 

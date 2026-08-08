@@ -18,7 +18,7 @@
 // a projection/expansion engine — building one here would be solving a
 // problem this source doesn't actually have.
 import { getShortcutForActivity } from "../activities";
-import { formatAbsoluteTime, hasEnded, isWithinRollingWindow, legacyDay, weekdayLabel } from "../time";
+import { daysFromToday, formatAbsoluteTime, hasEnded, isWithinRollingWindow, legacyDay, weekdayLabel } from "../time";
 import type { Session } from "../types";
 
 import rawDropIn from "@/data/toronto-open-data/drop-in.json";
@@ -67,12 +67,19 @@ type RawLocation = {
 const SNAPSHOT_FETCHED_AT = "2026-07-31";
 const OFFICIAL_SOURCE = "City of Toronto Open Data";
 
-// The real, intended production window. A caller (today, only the API
-// route) may request a narrower one — see getTorontoSessions' own comment
-// for why the route currently does.
-const DEFAULT_ROLLING_WINDOW_DAYS = 7;
-
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+// The real max date this snapshot's raw data extends to — computed from the
+// data itself, not assumed, so "how far forward can we honestly fetch"
+// always reflects actual source capability rather than a guessed constant.
+// This is deliberately a different concept from the UI's 7-day quick-nav
+// strip (see app/page.tsx): that's a navigation convenience, this is the
+// real schedule-availability boundary a calendar picker must respect so it
+// never offers a date the source can't back up.
+const rawMaxDateKey = (rawDropIn as RawDropInRecord[]).reduce(
+  (max, r) => (isValidDateKey(r["First Date"]) && r["First Date"] > max ? r["First Date"] : max),
+  "",
+);
 
 function formatAddress(l: RawLocation): string | undefined {
   const parts = [l["Street No"], l["Street No Suffix"], l["Street Name"], l["Street Type"], l["Street Direction"]].filter(
@@ -134,7 +141,12 @@ function recordSkipped(id: number, reason: SkipReason): void {
 }
 
 export function getTorontoSessions(now: Date, options?: { days?: number }): Session[] {
-  const days = options?.days ?? DEFAULT_ROLLING_WINDOW_DAYS;
+  // Default to the real remaining span of this snapshot's data — not a
+  // fixed constant — so a caller that omits `days` gets everything the
+  // source can actually back up. Floored at 7 so a stale/near-exhausted
+  // snapshot can never shrink the window below what the UI's own quick-nav
+  // strip needs to function.
+  const days = options?.days ?? Math.max(7, daysFromToday(rawMaxDateKey, now) + 1);
   const dropIn = rawDropIn as RawDropInRecord[];
   const locations = rawLocations as RawLocation[];
   const locationById = new Map(locations.map((l) => [l["Location ID"], l]));

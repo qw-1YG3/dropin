@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DateCalendar } from "./_components/DateCalendar";
 import { Sheet } from "./_components/Sheet";
 import {
   ACTIVITY_ICONS,
+  CalendarIcon,
   ComfortableListIcon,
   CompactListIcon,
   DirectionsIcon,
@@ -18,14 +20,17 @@ import { ACTIVITY_GROUPS, getShortcutForActivity, SHORTCUTS } from "@/lib/dropin
 import { getDisplayDistrict } from "@/lib/dropin/districts";
 import { parseQuery, sessionMatchesLocation, type DetectedLocation } from "@/lib/dropin/search-intent";
 import {
+  addDays,
   clockLabel,
   compareChronologically,
   dateLabel,
   dateStripContextLabel,
   dateStripDateLabel,
+  daysFromToday,
   fullDateLabel,
   isToday,
   isTomorrow,
+  localMidnight,
   rollingWindowDates,
   sessionStatus,
   shortDateLabel,
@@ -297,7 +302,6 @@ export default function SearchSurface() {
   // shift if the tab were left open across a real midnight).
   const now = useMemo(() => new Date(), []);
   const todayDateKey = useMemo(() => toDateKey(now), [now]);
-  const rollingDates = useMemo(() => rollingWindowDates(now, 7), [now]);
   // Separate from the stable `now` above on purpose: session status
   // (starting soon / in progress / ended) needs to keep advancing with real
   // time for as long as the page stays open, while date identity ("today")
@@ -309,6 +313,31 @@ export default function SearchSurface() {
   const [selectedDate, setSelectedDate] = useState<string>(todayDateKey);
   const [timeOfDayFilter, setTimeOfDayFilter] = useState<TimeOfDay | "all">("all");
   const [discoveryFreeOnly, setDiscoveryFreeOnly] = useState(false);
+
+  // The 7-day quick-nav strip's anchor — normally "today," matching the
+  // original always-starts-at-today behaviour, but the strip is a
+  // navigation convenience, not the schedule boundary: when the Calendar
+  // sends `selectedDate` somewhere the currently-shown window can't
+  // display, this re-centers so the selection stays visible rather than
+  // leaving the strip stranded on its original Aug 7-13-style window.
+  // Ordinary strip clicks never touch this — the clicked date is always
+  // already inside `rollingDates` by construction, so the effect below is a
+  // no-op — only a Calendar jump (or returning from one) triggers a
+  // recompute, which is exactly the one case that needs it.
+  const [stripAnchorDate, setStripAnchorDate] = useState<string>(todayDateKey);
+  const rollingDates = useMemo(() => rollingWindowDates(localMidnight(stripAnchorDate), 7), [stripAnchorDate]);
+  useEffect(() => {
+    if (rollingDates.includes(selectedDate)) return;
+    const diff = daysFromToday(selectedDate, now);
+    // Back within (or returning to) the original window snaps to the
+    // canonical today-anchored strip rather than some slightly-off
+    // recentring; only a genuinely far selection gets recentred around
+    // itself, with two days of leading context so it doesn't land as the
+    // very first visible date.
+    const nextAnchor = diff >= 0 && diff < 7 ? todayDateKey : toDateKey(addDays(localMidnight(selectedDate), -2));
+    setStripAnchorDate(nextAnchor);
+  }, [selectedDate, rollingDates, now, todayDateKey]);
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const discoveryCarouselScroll = useTrailingScrollFade<HTMLDivElement>();
   const dateStripScroll = useTrailingScrollFade<HTMLDivElement>();
   const subtypeScroll = useTrailingScrollFade<HTMLDivElement>();
@@ -476,6 +505,17 @@ export default function SearchSurface() {
   const liveSessions = useMemo(
     () => sessions.filter((s) => computeStatus(s, liveNow) !== "ended"),
     [sessions, liveNow],
+  );
+
+  // The Calendar's real upper bound — computed from whatever the fetch
+  // actually returned, never assumed. The API route now asks each adapter
+  // for its own genuine availability window rather than a fixed 7 days (see
+  // app/api/sessions/route.ts), so the furthest real `date` present in
+  // `sessions` *is* the source's honest boundary. Falls back to today so the
+  // Calendar has a sane (if empty) range before the fetch resolves.
+  const maxAvailableDateKey = useMemo(
+    () => sessions.reduce((max, s) => (s.date > max ? s.date : max), todayDateKey),
+    [sessions, todayDateKey],
   );
 
   const discoveryHighlights = useMemo(() => {
@@ -1006,12 +1046,12 @@ export default function SearchSurface() {
             <p className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm text-text-secondary">
               <span>
                 {activityDisplayLabel
-                  ? `${activityDisplayLabel} activities`
+                  ? `${activityDisplayLabel} Activities`
                   : effectiveLocation
                     ? `Activities in ${effectiveLocation.label}`
                     : committedQuery
                       ? `Activities in ${committedQuery}`
-                      : "All activities"}
+                      : "All Activities"}
               </span>
               {/* The activity name above is context, not a filter — this is
                   the one explicit way back to the unscoped set, so a single-
@@ -1036,58 +1076,96 @@ export default function SearchSurface() {
                 a selected state built from color + a thin underline
                 indicator rather than a filled pill, so "when" and "what"
                 don't look like the same control system stacked twice. */}
-            <div className="relative mb-4">
-              <div
-                ref={dateStripScroll.ref}
-                className="flex gap-0.5 overflow-x-auto pb-1"
-                role="group"
-                aria-label="Select a date"
-              >
-                {rollingDates.map((d) => {
-                  const active = d === selectedDate;
-                  return (
-                    <button
-                      key={d}
-                      type="button"
-                      aria-pressed={active}
-                      aria-label={fullDateLabel(d, now)}
-                      onClick={() => setSelectedDate(d)}
-                      className="group flex flex-shrink-0 flex-col items-center gap-1 rounded-lg px-3 pb-1.5 pt-2 transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95"
-                    >
-                      <span className={`text-xs font-medium ${active ? "text-sage-text" : "text-text-secondary group-hover:text-sage-text"}`}>
-                        {dateStripContextLabel(d, now)}
-                      </span>
-                      <span className={`text-sm font-semibold ${active ? "text-sage-text" : "text-text-primary group-hover:text-sage-text"}`}>
-                        {dateStripDateLabel(d)}
-                      </span>
-                      <span
-                        aria-hidden="true"
-                        className={`h-0.5 w-6 rounded-full transition-colors duration-150 ease-out ${active ? "bg-sage-text" : "bg-transparent"}`}
-                      />
-                    </button>
-                  );
-                })}
-              </div>
-              {dateStripScroll.showFade && (
+            <div className="mb-4 flex items-center gap-1">
+              <div className="relative min-w-0 flex-1">
+                {/* -ml-3 compensates for each date button's own px-3 text
+                    inset — unlike the bordered time-of-day/activity rows
+                    below, these buttons have no visible border to mark a
+                    box edge, so the bare weekday/date text is the first
+                    thing a reader actually sees. Without this, that text
+                    would sit 12px right of the heading above and the
+                    bordered rows below, breaking the shared left edge the
+                    refinement block is meant to read from. Pulls the
+                    button's own hit target left by the same amount, not
+                    just the text — harmless, since nothing marks that box
+                    visually until hover/focus. */}
                 <div
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-r from-transparent to-surface"
-                />
-              )}
+                  ref={dateStripScroll.ref}
+                  className="-ml-3 flex gap-0.5 overflow-x-auto pb-1"
+                  role="group"
+                  aria-label="Select a date"
+                >
+                  {rollingDates.map((d) => {
+                    const active = d === selectedDate;
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        aria-pressed={active}
+                        aria-label={fullDateLabel(d, now)}
+                        onClick={() => setSelectedDate(d)}
+                        className="group flex flex-shrink-0 flex-col items-center gap-1 rounded-lg px-3 pb-1.5 pt-2 transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95"
+                      >
+                        <span className={`text-xs font-medium ${active ? "text-sage-text" : "text-text-secondary group-hover:text-sage-text"}`}>
+                          {dateStripContextLabel(d, now)}
+                        </span>
+                        <span className={`text-sm font-semibold ${active ? "text-sage-text" : "text-text-primary group-hover:text-sage-text"}`}>
+                          {dateStripDateLabel(d)}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          className={`h-0.5 w-6 rounded-full transition-colors duration-150 ease-out ${active ? "bg-sage-text" : "bg-transparent"}`}
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+                {dateStripScroll.showFade && (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-r from-transparent to-surface"
+                  />
+                )}
+              </div>
+              {/* Pinned outside the scrollable strip, never part of its
+                  scroll content — the strip is quick navigation within a
+                  visible window; this is the secondary "the schedule goes
+                  further than these seven days" affordance, so it needs to
+                  stay reachable regardless of scroll position. */}
+              <button
+                type="button"
+                onClick={() => setCalendarOpen(true)}
+                aria-label="Choose another date"
+                className="flex h-9 w-9 flex-shrink-0 items-center justify-center self-start rounded-full border border-border/70 bg-white text-text-secondary transition-all duration-150 ease-out hover:bg-hover-surface hover:text-sage-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95"
+              >
+                <CalendarIcon className="h-4 w-4" />
+              </button>
             </div>
 
-            {/* Time of day — its own row, deliberately never sharing a
-                scrollable container with activity subtype chips. Subtype
-                lists (e.g. every Swimming variant) can run long enough to
-                push a shared row's later chips out of the visible area, and
-                time-of-day is too high-value a refinement to risk becoming
-                undiscoverable that way. At most 3 short chips, so this never
-                needs to scroll — flex-wrap is a safety net, not the primary
-                mechanism. Only rendered once there's a real choice to make,
-                and behaves as a toggle, like Discovery's Free chip —
-                tapping the active one again clears it. */}
+            {/* Time of day — a single segmented control, not a row of
+                independent chips. Date is calendar navigation, activity is a
+                set of category chips; time-of-day is neither "which day" nor
+                "which category" but a subdivision of the day itself, so it
+                gets its own coherent-looking control: one quiet bordered
+                soft-rectangle housing three segments, rather than three
+                separate bordered/shadowed chips that would read as more
+                activity filters. Deliberately NOT a full capsule
+                (rounded-full) — the activity row directly beneath already
+                uses that shape, and two different filter kinds sharing one
+                silhouette is exactly the sameness this control needs to
+                avoid. rounded-lg reuses the same corner radius the date
+                strip's own buttons already use elsewhere in this file, not
+                a new value. Deliberately never shares a scroll container
+                with activity subtype chips either — see the row below.
+                Only rendered once there's a real choice to make, and each
+                segment still behaves as a toggle, like Discovery's Free
+                chip — tapping the active one again clears it. */}
             {timeOfDayOptions.length > 1 && (
-              <div className="mb-2 flex flex-wrap gap-2" role="group" aria-label="Time of day">
+              <div
+                className="mb-2 inline-flex rounded-lg border border-border/70 bg-white p-0.5"
+                role="group"
+                aria-label="Time of day"
+              >
                 {timeOfDayOptions.map((t) => {
                   const active = timeOfDayFilter === t;
                   return (
@@ -1096,10 +1174,8 @@ export default function SearchSurface() {
                       type="button"
                       aria-pressed={active}
                       onClick={() => setTimeOfDayFilter(active ? "all" : t)}
-                      className={`flex-shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-all duration-[170ms] ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-95 ${
-                        active
-                          ? "border-transparent bg-sage/15 font-semibold text-sage-text"
-                          : "border-border bg-white font-medium text-text-secondary hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)]"
+                      className={`rounded-md px-3.5 py-1.5 text-sm transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-95 ${
+                        active ? "bg-sage/15 font-semibold text-sage-text" : "font-medium text-text-secondary hover:text-sage-text"
                       }`}
                     >
                       {TIME_OF_DAY_LABELS[t]}
@@ -1148,7 +1224,13 @@ export default function SearchSurface() {
               </div>
             )}
 
-            <div className="flex items-center justify-between border-t border-border/70 py-4 text-xs text-text-secondary">
+            {/* mt-3 here, not a bigger mb- on whichever refinement row
+                happens to be last (date, time, or activity, depending on
+                how many real choices exist) — adding it to the divider
+                instead means "the whole refinement cluster sits clearly
+                apart from results" holds true regardless of which row is
+                actually last, without needing per-case spacing logic. */}
+            <div className="mt-3 flex items-center justify-between border-t border-border/70 py-4 text-xs text-text-secondary">
               <span>{`${resultsFiltered.length} ${resultsFiltered.length === 1 ? "activity" : "activities"} ${lastUpdatedLabel ? ` · ${lastUpdatedLabel}` : ""}`}</span>
               <div className="flex flex-shrink-0 items-center gap-1" role="group" aria-label="List density">
                 <button
@@ -1414,6 +1496,23 @@ export default function SearchSurface() {
           </>
         )}
       </Sheet>
+
+      {/* ===================== DATE CALENDAR =====================
+          The secondary "choose another date" mechanism — selecting a date
+          here goes through the exact same setSelectedDate the quick-nav
+          strip uses, so query/activity/location/density are untouched and
+          the strip's own re-anchoring effect picks up the change
+          automatically. */}
+      <DateCalendar
+        open={calendarOpen}
+        onClose={() => setCalendarOpen(false)}
+        now={now}
+        selectedDate={selectedDate}
+        todayDateKey={todayDateKey}
+        minDateKey={todayDateKey}
+        maxDateKey={maxAvailableDateKey}
+        onSelectDate={setSelectedDate}
+      />
 
       {/* ===================== PRODUCT INFORMATION SHEET =====================
           Bottom sheet on mobile, centered modal from md: up — the Search

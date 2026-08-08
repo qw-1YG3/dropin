@@ -3,9 +3,9 @@ import type { Session } from "../types";
 
 export type SessionQueryOptions = {
   // How many days forward the rolling window covers, starting today.
-  // Defaults to each adapter's own real production window (currently 7 for
-  // Toronto) when omitted — a caller only needs to pass this to request
-  // something narrower, as the API route currently does.
+  // Defaults to each adapter's own real schedule-availability window when
+  // omitted (see getTorontoSessions) — a caller only needs to pass this to
+  // request something narrower than what the source can actually back up.
   days?: number;
 };
 
