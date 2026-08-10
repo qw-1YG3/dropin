@@ -15,6 +15,6 @@ import { getAllSessions } from "@/lib/dropin/sources";
 // highlight pool separately filters by an exact `date === today` match, so
 // it stays scoped to today regardless of how much data this returns.
 export async function GET() {
-  const sessions = getAllSessions(new Date());
+  const sessions = await getAllSessions(new Date());
   return NextResponse.json({ sessions });
 }

@@ -18,6 +18,7 @@ import {
 } from "./_components/icons";
 import { ACTIVITY_GROUPS, getShortcutForActivity, SHORTCUTS } from "@/lib/dropin/activities";
 import { getDisplayDistrict } from "@/lib/dropin/districts";
+import { MUNICIPALITIES } from "@/lib/dropin/municipalities";
 import { parseQuery, sessionMatchesLocation, type DetectedLocation } from "@/lib/dropin/search-intent";
 import {
   addDays,
@@ -68,6 +69,17 @@ const TIME_OF_DAY_LABELS: Record<TimeOfDay, string> = {
   afternoon: "Afternoon",
   evening: "Evening",
 };
+
+// Derived from the real registry, never hardcoded — this used to name
+// "Toronto" specifically in both the not-yet-available fallback message and
+// the About DropIn copy, which silently became wrong the moment a second
+// municipality went live (Phase 3.2, Part 10). Module-level since
+// MUNICIPALITIES is static; recomputing per render would be wasted work for
+// a value that can't change during the page's lifetime.
+const AVAILABLE_MUNICIPALITY_NAMES = MUNICIPALITIES.filter((m) => m.status === "available").map((m) => m.name);
+const AVAILABLE_MUNICIPALITIES_LABEL = new Intl.ListFormat("en", { style: "long", type: "conjunction" }).format(
+  AVAILABLE_MUNICIPALITY_NAMES,
+);
 
 // The one place a session's live status is derived from its real
 // start/end time — every caller that needs to know "is this happening now"
@@ -676,7 +688,7 @@ export default function SearchSurface() {
     // we checked Markham and came up empty, per "never imply certainty the
     // data can't support."
     if (effectiveLocation?.type === "municipality" && effectiveLocation.status === "not-yet-available") {
-      return `DropIn doesn't cover ${effectiveLocation.label} yet — here's what's available in Toronto instead.`;
+      return `DropIn doesn't cover ${effectiveLocation.label} yet — here's what's available in ${AVAILABLE_MUNICIPALITIES_LABEL} instead.`;
     }
 
     // Composes activity + time-of-day into one natural subject rather than
@@ -1324,7 +1336,13 @@ export default function SearchSurface() {
                         }}
                         className="rounded-full border border-border bg-white px-3.5 py-1.5 text-sm font-medium text-text-secondary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] active:scale-95"
                       >
-                        Show Toronto instead
+                        {/* Names the real action (clearing the location
+                            entirely, via the existing municipality registry
+                            below) rather than a hardcoded city — this used
+                            to always say "Show Toronto instead" even after
+                            other municipalities became available (Phase
+                            3.2, Part 10). */}
+                        Show all areas instead
                       </button>
                     ) : (
                       <>
@@ -1605,7 +1623,7 @@ export default function SearchSurface() {
 
         <h3 className="mt-4 text-xs font-semibold text-sage-text">Data sources</h3>
         <p className="mt-1 text-sm text-text-secondary">
-          DropIn currently covers the City of Toronto, using the City&rsquo;s official Open Data
+          DropIn currently covers {AVAILABLE_MUNICIPALITIES_LABEL}, using each city&rsquo;s official
           recreation listings. We&rsquo;re working to bring in more municipalities over time.
         </p>
 

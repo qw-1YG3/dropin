@@ -1,10 +1,14 @@
 // GTA-wide target coverage. "available" means a real adapter is registered
-// in lib/dropin/sources/ and actually returns sessions for it — right now
-// that's Toronto only. The rest are real target municipalities with no
-// wired data source yet (checked directly: Mississauga's open-data catalogue
-// has no drop-in dataset, Markham's drop-in programs live behind a
-// commercial booking widget, not their open-data portal — neither exposes
-// the kind of structured feed Toronto does). Listed here so Search can
+// in lib/dropin/sources/ and actually returns sessions for it — Toronto
+// (its own static-snapshot adapter) and, as of Phase 3.2, Mississauga and
+// Richmond Hill (both configured tenants of the shared ActiveCommunities
+// adapter — see lib/dropin/sources/activecommunities/). The rest are real
+// target municipalities with no wired data source yet: Markham/Vaughan/
+// Brampton/Burlington/Hamilton's own drop-in programs live behind a
+// PerfectMind/Xplor booking widget with no confirmed open access path
+// (Phase 3.0), and Ajax/Whitby/Oakville/Pickering/Milton haven't been
+// integrated yet even though some are the same ActiveCommunities platform —
+// "same platform" is not "already available." Listed here so Search can
 // recognize the name and respond honestly ("not covered yet") instead of
 // either pretending to have results or treating it as gibberish.
 export type MunicipalityStatus = "available" | "not-yet-available";
@@ -16,10 +20,10 @@ export type Municipality = {
 
 export const MUNICIPALITIES: Municipality[] = [
   { name: "Toronto", status: "available" },
-  { name: "Mississauga", status: "not-yet-available" },
+  { name: "Mississauga", status: "available" },
   { name: "Markham", status: "not-yet-available" },
   { name: "Vaughan", status: "not-yet-available" },
-  { name: "Richmond Hill", status: "not-yet-available" },
+  { name: "Richmond Hill", status: "available" },
   { name: "Brampton", status: "not-yet-available" },
   { name: "Oakville", status: "not-yet-available" },
   { name: "Burlington", status: "not-yet-available" },

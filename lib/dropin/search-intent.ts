@@ -63,12 +63,24 @@ function detectLocation(text: string, centreNames: string[]): DetectedLocation |
   return detectCentre(text, centreNames) ?? detectNeighbourhood(text) ?? detectPostalCode(text);
 }
 
+// Unions two sources rather than short-circuiting on the first: a
+// recognized shortcut keyword (e.g. "badminton") still resolves Toronto's
+// curated exact title ("Badminton") the same as before, but now ALSO picks
+// up any other municipality's real activity name containing that same
+// substring (e.g. Richmond Hill's "55+ Badminton (Drop-In)") — without that
+// municipality needing its own entry in ACTIVITY_GROUPS, which stays a
+// Toronto-vocabulary convenience, not a source of truth every municipality
+// must populate. Before Phase 3.2 this returned at most one substring match
+// (`.find`) and never fell through to the substring scan at all for a
+// recognized shortcut keyword — silently correct only because Toronto was
+// the only municipality with real data; multi-municipality search needs
+// every real match, not just the first or the curated one.
 function matchActivity(text: string, knownActivityNames: string[]): string[] {
   const q = text.trim().toLowerCase();
   if (!q) return [];
-  if (ACTIVITY_GROUPS[q]) return ACTIVITY_GROUPS[q];
-  const match = knownActivityNames.find((a) => a.toLowerCase().includes(q));
-  return match ? [match] : [];
+  const shortcutGroup = ACTIVITY_GROUPS[q] ?? [];
+  const substringMatches = knownActivityNames.filter((a) => a.toLowerCase().includes(q));
+  return Array.from(new Set([...shortcutGroup, ...substringMatches]));
 }
 
 // Follows docs/SEARCH_ENGINE.md's Mixed Query Parsing: segment the query and
@@ -81,6 +93,22 @@ export function parseQuery(query: string, sessions: Session[]): ParsedQuery {
 
   const trimmed = query.trim();
   if (!trimmed) return { activities: [], location: undefined };
+
+  // An exact municipality or neighbourhood name is a strong enough signal
+  // that it must win outright over a *substring* activity match against
+  // that same whole string. Real case that surfaced this: a Mississauga
+  // program is genuinely titled "Drop In Seniors' Centre Mississauga Swing
+  // B&" — once matchActivity started unioning in real substring matches
+  // (Phase 3.2, needed for cross-municipality activity search), a plain
+  // "Mississauga" search would otherwise spuriously resolve as BOTH that
+  // one activity AND the municipality, instead of just the municipality
+  // search it obviously is. This can only fire when the trimmed query is
+  // itself exactly the location name — never for a genuine mixed query
+  // like "badminton Mississauga", which doesn't equal "Mississauga" alone.
+  if (matchDistrictExact(trimmed) ?? matchMunicipalityExact(trimmed)) {
+    const exactLocation = detectLocation(trimmed, centreNames);
+    if (exactLocation) return { activities: [], location: exactLocation };
+  }
 
   const wholeActivity = matchActivity(trimmed, knownActivityNames);
   const wholeLocation = detectLocation(trimmed, centreNames);
