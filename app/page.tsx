@@ -625,14 +625,26 @@ export default function SearchSurface() {
     return undefined;
   }, [activeFilter, matchedActivities]);
 
-  // The one real freshness signal the data layer provides — every session
-  // in the current snapshot shares the same lastUpdated date, so the first
-  // one is representative. Computed relative to "now" rather than a fixed
-  // string, so it stays true regardless of when the page is loaded.
+  // Freshness of what's actually on screen, not an arbitrary session from
+  // the whole combined pool. Phase 3.3 gave Toronto, Mississauga, and
+  // Richmond Hill independently-refreshed snapshots (recommended on
+  // different cadences — see docs/PHASE_3_3_DATA_REFRESH_SNAPSHOT_PIPELINE.md
+  // Part 16), so `sessions[0]?.lastUpdated` stopped being a safe stand-in
+  // the moment more than one municipality could exist: it would silently
+  // show whichever municipality happens to sort first in the combined
+  // array, regardless of what the user is actually looking at. Scoped to
+  // resultsFiltered (the currently-displayed set) and, when that set spans
+  // sources with different freshness, takes the oldest one — "this view is
+  // only as fresh as its stalest contributor" is the honest claim,
+  // matching the existing "never imply certainty the data can't support"
+  // principle rather than picking whichever value looks best. Computed
+  // relative to "now" rather than a fixed string, so it stays true
+  // regardless of when the page is loaded.
   const lastUpdatedLabel = useMemo(() => {
-    const raw = sessions[0]?.lastUpdated;
-    return raw ? daysAgoLabel(raw) : undefined;
-  }, [sessions]);
+    if (resultsFiltered.length === 0) return undefined;
+    const oldest = resultsFiltered.reduce((min, s) => (s.lastUpdated < min ? s.lastUpdated : min), resultsFiltered[0].lastUpdated);
+    return daysAgoLabel(oldest);
+  }, [resultsFiltered]);
 
   // Grouping depends on which date is selected, not a fixed shape: live
   // status (Happening now / Starting soon / Starting today / Later today)

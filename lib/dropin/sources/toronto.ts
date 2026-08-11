@@ -1,30 +1,34 @@
-// Toronto Open Data adapter — the first (and currently only) municipality
-// wired into the common Session model. Raw field names mirror the source's
-// "Registered Programs and Drop-in Courses Offering" package (Drop-in.json /
-// Locations.json) exactly, so a diff against a fresh API pull stays
-// meaningful. This file is the one place that shape is allowed to leak into;
-// everything downstream of getTorontoSessions() only ever sees the common
-// Session model from ../types.
+// Toronto Open Data normalizer — the one place Toronto's raw field shape
+// (the "Registered Programs and Drop-in Courses Offering" package's
+// Drop-in / Locations resources) is allowed to leak into; everything
+// downstream only ever sees the common Session model from ../types.
 //
-// Recurrence shape, confirmed directly against the real data (all 13,408
-// records in the current snapshot): First Date === Last Date on every row,
-// with dates spanning roughly six weeks out. Each raw row already IS one
-// specific dated occurrence — there is no recurring template here that
-// needs expanding into multiple dates. Course_ID is what actually
-// identifies "the same recurring program" across its many separately-dated
-// rows; DayOftheWeek is redundant with First Date (verified to agree on
-// all 13,408 records) rather than an independent recurrence pattern. So
-// this file is a validate-and-normalize pass over already-dated rows, not
-// a projection/expansion engine — building one here would be solving a
-// problem this source doesn't actually have.
+// Phase 3.3 split this file: it used to read the bundled JSON snapshot
+// itself and apply a live now-based rolling-window filter in one pass, on
+// the request path. As of Phase 3.3, normalization is a pure function of
+// whatever raw data it's given (called by scripts/refresh/toronto.ts
+// against either a freshly-fetched live snapshot or, as a fallback, the
+// committed bundle) — it takes no `now` and applies no time-window
+// filtering, because a canonical snapshot built once at refresh time must
+// stay valid to read hours or days later. The live "is this still within
+// range, has it ended yet" view is applied fresh at request time instead,
+// in lib/dropin/sources/index.ts, against whatever `now` actually is when
+// someone asks. See docs/PHASE_3_3_DATA_REFRESH_SNAPSHOT_PIPELINE.md.
+//
+// Recurrence shape, confirmed directly against real data (both the
+// original 13,408-record snapshot and the live ~29,000-record feed): First
+// Date === Last Date on every row. Each raw row already IS one specific
+// dated occurrence — there is no recurring template here that needs
+// expanding into multiple dates. Course_ID is what actually identifies
+// "the same recurring program" across its many separately-dated rows;
+// DayOftheWeek is redundant with First Date rather than an independent
+// recurrence pattern. So this file is a validate-and-normalize pass over
+// already-dated rows, not a projection/expansion engine.
 import { getShortcutForActivity } from "../activities";
-import { daysFromToday, formatAbsoluteTime, hasEnded, isWithinRollingWindow, legacyDay, weekdayLabel } from "../time";
+import { formatAbsoluteTime, weekdayLabel } from "../time";
 import type { Session } from "../types";
 
-import rawDropIn from "@/data/toronto-open-data/drop-in.json";
-import rawLocations from "@/data/toronto-open-data/locations.json";
-
-type RawDropInRecord = {
+export type RawDropInRecord = {
   _id: number;
   "Location ID": number;
   Course_ID: number;
@@ -42,7 +46,7 @@ type RawDropInRecord = {
   DayOftheWeek: string;
 };
 
-type RawLocation = {
+export type RawLocation = {
   _id: number;
   "Location ID": number;
   "Parent Location ID": number;
@@ -61,25 +65,9 @@ type RawLocation = {
   Description: string;
 };
 
-// The snapshot was fetched 2026-07-31 — see data/toronto-open-data/. Static
-// until Sprint 03's own scoping note is revisited (a scheduled live refetch,
-// not yet built).
-const SNAPSHOT_FETCHED_AT = "2026-07-31";
-const OFFICIAL_SOURCE = "City of Toronto Open Data";
+export const OFFICIAL_SOURCE = "City of Toronto Open Data";
 
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-
-// The real max date this snapshot's raw data extends to — computed from the
-// data itself, not assumed, so "how far forward can we honestly fetch"
-// always reflects actual source capability rather than a guessed constant.
-// This is deliberately a different concept from the UI's 7-day quick-nav
-// strip (see app/page.tsx): that's a navigation convenience, this is the
-// real schedule-availability boundary a calendar picker must respect so it
-// never offers a date the source can't back up.
-const rawMaxDateKey = (rawDropIn as RawDropInRecord[]).reduce(
-  (max, r) => (isValidDateKey(r["First Date"]) && r["First Date"] > max ? r["First Date"] : max),
-  "",
-);
 
 function formatAddress(l: RawLocation): string | undefined {
   const parts = [l["Street No"], l["Street No Suffix"], l["Street Name"], l["Street Type"], l["Street Direction"]].filter(
@@ -100,12 +88,8 @@ function isValidHourMinute(hour: number, minute: number): boolean {
 }
 
 // Shape alone (DATE_KEY_PATTERN) isn't enough — "2026-13-99" matches
-// \d{4}-\d{2}-\d{2} but isn't a real date. Some JS engines silently roll an
-// out-of-range date like that over into a *different*, valid-looking date
-// instead of rejecting it, so round-tripping the parsed components back
-// against the input is the only reliable check — verified directly (see
-// the sprint's defensive verification script) that V8 itself returns
-// Invalid Date here, but this can't assume every engine agrees.
+// \d{4}-\d{2}-\d{2} but isn't a real date — round-tripping the parsed
+// components back against the input is the only reliable check.
 function isValidDateKey(dateKey: string): boolean {
   if (!DATE_KEY_PATTERN.test(dateKey)) return false;
   const d = new Date(`${dateKey}T00:00:00`);
@@ -118,92 +102,64 @@ function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-// Every reason a raw row is left out — never a silent drop. None of these
-// currently fire against the real snapshot (checked directly: no malformed
-// dates, no malformed times, no end-before-start rows, no orphaned Location
-// IDs, no duplicate _id/occurrence keys), but the source is a live city
-// feed, not a fixture DropIn controls, so a future refresh could introduce
-// any of them.
-type SkipReason =
-  | "malformed-date"
-  | "outside-requested-window"
-  | "malformed-time"
-  | "end-before-start"
-  | "unknown-location"
-  | "duplicate-occurrence";
+// Every reason a raw row is left out — never a silent drop.
+export type SkipReason = "malformed-date" | "malformed-time" | "end-before-start" | "unknown-location" | "duplicate-occurrence";
 
-function recordSkipped(id: number, reason: SkipReason): void {
-  // Outside the requested window is normal, expected traffic (most rows on
-  // any given day are simply further out than what was asked for) — not a
-  // data-quality problem, so it doesn't warrant a diagnostic log line.
-  if (reason === "outside-requested-window") return;
-  console.warn(`[toronto adapter] skipped drop-in record ${id}: ${reason}`);
-}
+export type NormalizeResult = {
+  sessions: Session[];
+  skipped: Partial<Record<SkipReason, number>>;
+};
 
-export function getTorontoSessions(now: Date, options?: { days?: number }): Session[] {
-  // Default to the real remaining span of this snapshot's data — not a
-  // fixed constant — so a caller that omits `days` gets everything the
-  // source can actually back up. Floored at 7 so a stale/near-exhausted
-  // snapshot can never shrink the window below what the UI's own quick-nav
-  // strip needs to function.
-  const days = options?.days ?? Math.max(7, daysFromToday(rawMaxDateKey, now) + 1);
-  const dropIn = rawDropIn as RawDropInRecord[];
-  const locations = rawLocations as RawLocation[];
-  const locationById = new Map(locations.map((l) => [l["Location ID"], l]));
-
+// Pure: given raw rows and the date this data was fetched, produces every
+// valid canonical Session — no `now`, no window filtering, no fabricated
+// values for fields Toronto's feed doesn't have (latitude/longitude, price,
+// phone, officialUrl all stay undefined, same as before this split).
+export function normalizeTorontoSessions(rawDropIn: RawDropInRecord[], rawLocations: RawLocation[], fetchedAtDateKey: string): NormalizeResult {
+  const locationById = new Map(rawLocations.map((l) => [l["Location ID"], l]));
   const sessions: Session[] = [];
   const seenOccurrenceKeys = new Set<string>();
+  const skipped: Partial<Record<SkipReason, number>> = {};
 
-  for (const r of dropIn) {
+  const recordSkip = (reason: SkipReason) => {
+    skipped[reason] = (skipped[reason] ?? 0) + 1;
+  };
+
+  for (const r of rawDropIn) {
     const dateKey = r["First Date"];
     if (!isValidDateKey(dateKey)) {
-      recordSkipped(r._id, "malformed-date");
-      continue;
-    }
-
-    if (!isWithinRollingWindow(dateKey, now, days)) {
-      recordSkipped(r._id, "outside-requested-window");
+      recordSkip("malformed-date");
       continue;
     }
 
     if (!isValidHourMinute(r["Start Hour"], r["Start Minute"]) || !isValidHourMinute(r["End Hour"], r["End Min"])) {
-      recordSkipped(r._id, "malformed-time");
+      recordSkip("malformed-time");
       continue;
     }
 
     const start = new Date(`${dateKey}T${pad2(r["Start Hour"])}:${pad2(r["Start Minute"])}:00`);
     const end = new Date(`${dateKey}T${pad2(r["End Hour"])}:${pad2(r["End Min"])}:00`);
 
-    // Belt-and-suspenders: dateKey and both hour/minute pairs are already
-    // validated above, so this should be unreachable — but an Invalid Date's
-    // getTime() is NaN, and NaN comparisons are always false, which would
-    // silently defeat the end-before-start check below rather than raising
-    // it. Checking explicitly here means a future change to the validation
-    // above can't quietly reopen that hole.
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-      recordSkipped(r._id, "malformed-time");
+      recordSkip("malformed-time");
       continue;
     }
 
     if (end.getTime() <= start.getTime()) {
-      recordSkipped(r._id, "end-before-start");
+      recordSkip("end-before-start");
       continue;
     }
 
-    if (hasEnded(end, now)) continue;
-
     const location = locationById.get(r["Location ID"]);
     if (!location) {
-      recordSkipped(r._id, "unknown-location");
+      recordSkip("unknown-location");
       continue;
     }
 
     // Same location + course + exact start instant would mean the source
-    // published the same occurrence twice — never observed in the real
-    // snapshot (checked directly), but guarded rather than assumed.
+    // published the same occurrence twice.
     const occurrenceKey = `${r["Location ID"]}|${r.Course_ID}|${start.toISOString()}`;
     if (seenOccurrenceKeys.has(occurrenceKey)) {
-      recordSkipped(r._id, "duplicate-occurrence");
+      recordSkip("duplicate-occurrence");
       continue;
     }
     seenOccurrenceKeys.add(occurrenceKey);
@@ -214,17 +170,15 @@ export function getTorontoSessions(now: Date, options?: { days?: number }): Sess
 
     sessions.push({
       id,
-      // Equal to `id` today because Toronto's feed already provides one row
-      // per dated occurrence (see the file-level comment) — kept distinct
-      // for a future source that genuinely expands a template into many
-      // dates.
       projectedOccurrenceId: id,
       sourceScheduleId: `toronto-course-${r.Course_ID}`,
       activity,
       category: getShortcutForActivity(activity) ?? activity,
       date: dateKey,
       dayOfWeek: weekdayLabel(dateKey),
-      day: legacyDay(dateKey, now),
+      // `day` (today/tomorrow) is deliberately NOT set here — it depends on
+      // live `now` at read time, not the fetch time this function runs at.
+      // See lib/dropin/sources/index.ts, which sets it fresh per request.
       absoluteTime: formatAbsoluteTime(r["Start Hour"], r["Start Minute"], r["End Hour"], r["End Min"]),
       startMinutes: r["Start Hour"] * 60 + r["Start Minute"],
       startDateTime: `${dateKey}T${pad2(r["Start Hour"])}:${pad2(r["Start Minute"])}:00`,
@@ -237,10 +191,10 @@ export function getTorontoSessions(now: Date, options?: { days?: number }): Sess
       ageMin: parseAge(r["Age Min"]),
       ageMax: parseAge(r["Age Max"]),
       officialSource: OFFICIAL_SOURCE,
-      lastUpdated: SNAPSHOT_FETCHED_AT,
+      lastUpdated: fetchedAtDateKey,
       verificationStatus: "verified",
     });
   }
 
-  return sessions;
+  return { sessions, skipped };
 }

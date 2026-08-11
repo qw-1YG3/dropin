@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "refresh:data": "tsx scripts/refresh/index.ts",
+    "snapshot:health": "tsx scripts/snapshot-health.ts"
   },
   "dependencies": {
     "next": "16.2.12",
@@ -21,6 +23,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
+    "tsx": "^4.23.12",
     "typescript": "^5"
   }
 }

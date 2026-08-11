@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Phase 3.3 — generated data-refresh snapshots (raw + canonical). These are
+# refreshed via `npm run refresh:data`, not committed source — the original
+# bundled Toronto dataset at data/toronto-open-data/ is unaffected and
+# stays tracked as-is. See docs/PHASE_3_3_DATA_REFRESH_SNAPSHOT_PIPELINE.md.
+/data/raw/
+/data/canonical/
