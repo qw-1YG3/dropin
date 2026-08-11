@@ -11,25 +11,30 @@
 //   npm run refresh:data -- --municipality=mississauga
 //   npm run refresh:data -- --municipality=toronto
 //   npm run refresh:data                    (defaults to --all)
+//   npm run refresh:data -- --all --json    (machine-readable summary on
+//                                             stdout, for a scheduler step
+//                                             that wants to parse the
+//                                             result — Phase 3.3B Part 21)
 import { refreshToronto } from "./toronto";
 import { refreshActiveCommunitiesMunicipality, refreshAllActiveCommunities } from "./activecommunities";
 import { ACTIVE_COMMUNITIES_MUNICIPALITIES } from "../../lib/dropin/sources/activecommunities";
 import { municipalitySlug } from "../../lib/dropin/snapshot/paths";
-import { printReport, type SourceReport } from "./lib";
+import { printReport, printReportJson, type SourceReport } from "./lib";
 
-function parseArgs(argv: string[]): { all: boolean; municipality: string | undefined } {
+function parseArgs(argv: string[]): { all: boolean; municipality: string | undefined; json: boolean } {
   const municipalityArg = argv.find((a) => a.startsWith("--municipality="));
   const municipality = municipalityArg?.split("=")[1];
   const all = argv.includes("--all") || !municipality;
-  return { all, municipality };
+  const json = argv.includes("--json");
+  return { all, municipality, json };
 }
 
 async function main() {
-  const { all, municipality } = parseArgs(process.argv.slice(2));
+  const { all, municipality, json } = parseArgs(process.argv.slice(2));
   const reports: SourceReport[] = [];
 
   if (all) {
-    console.log("Refreshing all sources...\n");
+    if (!json) console.log("Refreshing all sources...\n");
     // Source-isolated by construction: each of these already contains its
     // own try/catch (Toronto) or Promise.allSettled (the AC family) inside
     // refreshOneSource, so one throwing here would itself be a bug — but
@@ -61,7 +66,11 @@ async function main() {
     }
   }
 
-  printReport(reports);
+  if (json) {
+    printReportJson(reports);
+  } else {
+    printReport(reports);
+  }
   process.exit(reports.every((r) => r.activated) ? 0 : 1);
 }
 

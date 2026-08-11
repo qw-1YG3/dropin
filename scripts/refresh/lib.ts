@@ -175,3 +175,21 @@ export function printReport(reports: SourceReport[]): void {
   console.log(`SUMMARY: ${succeeded}/${reports.length} source(s) activated a new snapshot.`);
   console.log("=".repeat(78) + "\n");
 }
+
+// Machine-readable form of the same report (Phase 3.3B, Part 21) — for a
+// scheduler that wants to parse results programmatically (e.g. a GitHub
+// Actions step summary, or a future notification webhook) rather than
+// scrape the human-readable log. Printed to stdout as a single JSON line
+// so it's still `console.log`-capturable by any runner.
+export function printReportJson(reports: SourceReport[]): void {
+  const succeeded = reports.filter((r) => r.activated).length;
+  console.log(
+    JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      succeeded,
+      total: reports.length,
+      allActivated: succeeded === reports.length,
+      reports,
+    }),
+  );
+}

@@ -21,7 +21,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { normalizeTorontoSessions, OFFICIAL_SOURCE, type RawDropInRecord, type RawLocation } from "../../lib/dropin/sources/toronto";
 import { municipalitySlug } from "../../lib/dropin/snapshot/paths";
-import { refreshOneSource, printReport, type SourceReport } from "./lib";
+import { refreshOneSource, printReport, printReportJson, type SourceReport } from "./lib";
 
 const PACKAGE_ID = "1a5be46a-4039-48cd-a2d2-8e702abf9516";
 const DROPIN_RESOURCE_ID = "067b41e7-ac8a-4d3f-ad08-089f8cd70316";
@@ -93,7 +93,8 @@ export async function refreshToronto(): Promise<SourceReport> {
 if (import.meta.url === `file://${process.argv[1]}`) {
   (async () => {
     const report = await refreshToronto();
-    printReport([report]);
+    if (process.argv.includes("--json")) printReportJson([report]);
+    else printReport([report]);
     process.exit(report.activated ? 0 : 1);
   })();
 }

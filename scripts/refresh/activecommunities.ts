@@ -8,7 +8,7 @@
 // read-path isolation.
 import { fetchAndNormalizeMunicipality, ACTIVE_COMMUNITIES_MUNICIPALITIES, type ActiveCommunitiesMunicipalityConfig } from "../../lib/dropin/sources/activecommunities";
 import { municipalitySlug } from "../../lib/dropin/snapshot/paths";
-import { refreshOneSource, printReport, type SourceReport } from "./lib";
+import { refreshOneSource, printReport, printReportJson, type SourceReport } from "./lib";
 
 export async function refreshActiveCommunitiesMunicipality(config: ActiveCommunitiesMunicipalityConfig): Promise<SourceReport> {
   return refreshOneSource({
@@ -50,7 +50,9 @@ export async function refreshAllActiveCommunities(): Promise<SourceReport[]> {
 // Runnable standalone: `npx tsx scripts/refresh/activecommunities.ts [municipality-name]`
 if (import.meta.url === `file://${process.argv[1]}`) {
   (async () => {
-    const arg = process.argv[2];
+    const rawArgs = process.argv.slice(2);
+    const json = rawArgs.includes("--json");
+    const arg = rawArgs.find((a) => !a.startsWith("--"));
     let reports: SourceReport[];
     if (arg) {
       const config = ACTIVE_COMMUNITIES_MUNICIPALITIES.find((c) => municipalitySlug(c.municipality) === municipalitySlug(arg));
@@ -62,7 +64,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     } else {
       reports = await refreshAllActiveCommunities();
     }
-    printReport(reports);
+    if (json) printReportJson(reports);
+    else printReport(reports);
     process.exit(reports.every((r) => r.activated) ? 0 : 1);
   })();
 }
