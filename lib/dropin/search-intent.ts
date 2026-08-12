@@ -75,11 +75,39 @@ function detectLocation(text: string, centreNames: string[]): DetectedLocation |
 // recognized shortcut keyword — silently correct only because Toronto was
 // the only municipality with real data; multi-municipality search needs
 // every real match, not just the first or the curated one.
+// A plain substring check alone misses real cross-municipality vocabulary
+// variance that isn't a synonym problem, just a stem/suffix one: Toronto's
+// curated shortcut is "swimming," but Markham's real titles ("Drop-In Lane
+// Swim") only contain "swim" — "swimming" is not a substring of "swim" even
+// though a person searching "swimming" obviously means it (Phase 3.5B,
+// verified against real Markham data). Checking whether the query and a
+// real word from the activity name share a common prefix catches this
+// generically — for either direction of length — without hardcoding
+// "swimming"/"swim" or any other specific pair, and without weakening the
+// existing plain-substring match this already handled correctly (e.g.
+// Richmond Hill's "55+ Badminton (Drop-In)" matching "badminton"). The
+// length-3 floor avoids short words like "at" or "co-ed" producing
+// spuriously broad prefix matches.
+function activityNameMatchesQuery(activityName: string, q: string): boolean {
+  const lowerName = activityName.toLowerCase();
+  if (lowerName.includes(q)) return true;
+  // Single-word queries only: a multi-word query like "swimming markham"
+  // must NOT match here just because its first word stems to "swim" — that
+  // would report an activity match for "swimming markham" as a whole and
+  // short-circuit parseQuery's segmentation loop before it ever splits the
+  // query into an activity half ("swimming") and a location half
+  // ("markham"), silently dropping the location. The plain substring check
+  // above already covers legitimate multi-word activity phrases (e.g.
+  // "table tennis" against "Table Tennis").
+  if (q.includes(" ")) return false;
+  return lowerName.split(/\W+/).some((word) => word.length >= 3 && q.length >= 3 && (q.startsWith(word) || word.startsWith(q)));
+}
+
 function matchActivity(text: string, knownActivityNames: string[]): string[] {
   const q = text.trim().toLowerCase();
   if (!q) return [];
   const shortcutGroup = ACTIVITY_GROUPS[q] ?? [];
-  const substringMatches = knownActivityNames.filter((a) => a.toLowerCase().includes(q));
+  const substringMatches = knownActivityNames.filter((a) => activityNameMatchesQuery(a, q));
   return Array.from(new Set([...shortcutGroup, ...substringMatches]));
 }
 

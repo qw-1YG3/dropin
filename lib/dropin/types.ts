@@ -2,6 +2,19 @@ export type Day = "today" | "tomorrow";
 
 export type VerificationStatus = "verified" | "unverified";
 
+// The one attendance-related concept any current source can actually back
+// up with real evidence (Phase 3.5A/3.5B) — a genuine three-way state the
+// PerfectMind family exposes per session (open to register / waitlisted /
+// closed), never a broader "walk-in vs. reservation" spectrum no source
+// has been found to support. Left undefined for every other source family
+// (Toronto, ActiveCommunities) and for any PerfectMind session whose
+// button state didn't map confidently to one of these three (e.g. a
+// "More Info" state with no verified meaning) — undefined here means
+// "unknown," never "walk-in." See docs/PHASE_3_5B_PERFECTMIND_PRODUCTION.md
+// Part 10 for why this is the smallest evidence-based addition rather than
+// a general attendanceMode field.
+export type RegistrationStatus = "open" | "waitlist" | "closed";
+
 // DropIn's common normalized session model — the one shape every municipal
 // data source adapter (lib/dropin/sources/*) must produce. The Search Engine
 // only ever operates on this; it never knows or cares which municipality or
@@ -80,4 +93,9 @@ export type Session = {
   officialSource: string;
   lastUpdated: string;
   verificationStatus: VerificationStatus;
+  // Optional and source-dependent — see RegistrationStatus above. Not
+  // rendered anywhere in the UI yet (Phase 3.5B is data-layer only); this
+  // exists so the data a future Decision Sheet action needs is already
+  // flowing through the pipeline before that UI work begins.
+  registrationStatus?: RegistrationStatus;
 };

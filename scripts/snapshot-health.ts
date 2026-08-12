@@ -10,7 +10,7 @@ import { readJsonIfExists } from "../lib/dropin/snapshot/io";
 import { canonicalLatestPath, canonicalPreviousPath, rawLatestPath, municipalitySlug } from "../lib/dropin/snapshot/paths";
 import type { CanonicalSnapshot, RawSnapshot } from "../lib/dropin/snapshot/types";
 
-const MUNICIPALITIES = ["Toronto", "Mississauga", "Richmond Hill"];
+const MUNICIPALITIES = ["Toronto", "Mississauga", "Richmond Hill", "Vaughan", "Markham"];
 
 // Thresholds derived from the Phase 3.3B recommended 6-hour refresh
 // cadence (see docs/PHASE_3_3B_SCHEDULER_DEPLOYMENT_STRATEGY.md Part 10):

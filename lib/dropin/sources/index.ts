@@ -28,7 +28,7 @@ export type SessionQueryOptions = {
   days?: number;
 };
 
-const MUNICIPALITY_SLUGS = ["toronto", "mississauga", "richmond-hill"] as const;
+const MUNICIPALITY_SLUGS = ["toronto", "mississauga", "richmond-hill", "vaughan", "markham"] as const;
 
 // Cached per municipality, invalidated by the snapshot file's own mtime —
 // avoids re-reading and re-parsing a potentially large JSON file on every

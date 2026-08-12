@@ -17,7 +17,9 @@
 //                                             result — Phase 3.3B Part 21)
 import { refreshToronto } from "./toronto";
 import { refreshActiveCommunitiesMunicipality, refreshAllActiveCommunities } from "./activecommunities";
+import { refreshPerfectMindMunicipality, refreshAllPerfectMind } from "./perfectmind";
 import { ACTIVE_COMMUNITIES_MUNICIPALITIES } from "../../lib/dropin/sources/activecommunities";
+import { PERFECTMIND_MUNICIPALITIES } from "../../lib/dropin/sources/perfectmind";
 import { municipalitySlug } from "../../lib/dropin/snapshot/paths";
 import { printReport, printReportJson, type SourceReport } from "./lib";
 
@@ -36,10 +38,11 @@ async function main() {
   if (all) {
     if (!json) console.log("Refreshing all sources...\n");
     // Source-isolated by construction: each of these already contains its
-    // own try/catch (Toronto) or Promise.allSettled (the AC family) inside
-    // refreshOneSource, so one throwing here would itself be a bug — but
-    // wrap anyway rather than trusting that invariant silently.
-    const [torontoReport, acReports] = await Promise.all([
+    // own try/catch (Toronto) or Promise.allSettled (the AC/PerfectMind
+    // families) inside refreshOneSource, so one throwing here would itself
+    // be a bug — but wrap anyway rather than trusting that invariant
+    // silently.
+    const [torontoReport, acReports, pmReports] = await Promise.all([
       refreshToronto().catch((err): SourceReport => ({
         source: "City of Toronto Open Data",
         municipality: "Toronto",
@@ -50,19 +53,25 @@ async function main() {
         failureReason: `unexpected error: ${err instanceof Error ? err.message : String(err)}`,
       })),
       refreshAllActiveCommunities(),
+      refreshAllPerfectMind(),
     ]);
-    reports.push(torontoReport, ...acReports);
+    reports.push(torontoReport, ...acReports, ...pmReports);
   } else if (municipality) {
     const slug = municipalitySlug(municipality);
     if (slug === "toronto") {
       reports.push(await refreshToronto());
     } else {
-      const config = ACTIVE_COMMUNITIES_MUNICIPALITIES.find((c) => municipalitySlug(c.municipality) === slug);
-      if (!config) {
-        console.error(`Unknown municipality "${municipality}". Known: toronto, ${ACTIVE_COMMUNITIES_MUNICIPALITIES.map((c) => municipalitySlug(c.municipality)).join(", ")}`);
+      const acConfig = ACTIVE_COMMUNITIES_MUNICIPALITIES.find((c) => municipalitySlug(c.municipality) === slug);
+      const pmConfig = PERFECTMIND_MUNICIPALITIES.find((c) => municipalitySlug(c.municipality) === slug);
+      if (acConfig) {
+        reports.push(await refreshActiveCommunitiesMunicipality(acConfig));
+      } else if (pmConfig) {
+        reports.push(await refreshPerfectMindMunicipality(pmConfig));
+      } else {
+        const known = ["toronto", ...ACTIVE_COMMUNITIES_MUNICIPALITIES.map((c) => municipalitySlug(c.municipality)), ...PERFECTMIND_MUNICIPALITIES.map((c) => municipalitySlug(c.municipality))];
+        console.error(`Unknown municipality "${municipality}". Known: ${known.join(", ")}`);
         process.exit(1);
       }
-      reports.push(await refreshActiveCommunitiesMunicipality(config));
     }
   }
 
