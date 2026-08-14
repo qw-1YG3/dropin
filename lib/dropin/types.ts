@@ -15,6 +15,33 @@ export type VerificationStatus = "verified" | "unverified";
 // a general attendanceMode field.
 export type RegistrationStatus = "open" | "waitlist" | "closed";
 
+// A STABLE participation requirement — deliberately not derived from the
+// volatile per-record RegistrationStatus above (Phase 3.5C). Real evidence:
+// PerfectMind's own per-record BookButtonText turns out to be heavily
+// time-relative (a live check of Vaughan/Markham found "More Info" — an
+// ambiguous, non-actionable state — dominates every record more than 7
+// days out, while "Register Now!"/"Waitlist" cluster in the 0-7 day
+// window; the same occurrence flips between these as its registration
+// window opens), which is exactly the kind of state DropIn's snapshot
+// refresh cadence cannot keep truthful. What IS stable and refresh-cadence
+// -safe is the structural fact of which mechanism a municipality's whole
+// program uses to admit participants — Toronto's dataset is categorically
+// the City's own "Drop-in" (walk-in) program data, distinct from its
+// separately-published Registered Programs data and carrying no
+// registration field of any kind; every Vaughan/Markham record lives
+// inside a PerfectMind BookMe4 booking platform whose own widget labels
+// its primary action "Register Now!"/"Register" for literally every
+// record sampled, with zero walk-in language anywhere in source text.
+// ActiveCommunities (Mississauga, Richmond Hill) has no reliable signal
+// either way (Phase 3.1 found `reservation_event_type_id` is 0 for every
+// event tested) and stays undefined here, same as it already does for
+// RegistrationStatus. Only two values are defined because only two source
+// families currently have real evidence to justify one — no
+// "registration-available" or explicit "unknown" member exists merely to
+// sketch out a hypothetical future value; undefined already means unknown,
+// same convention as every other optional field on Session.
+export type AttendanceRequirement = "pre-registration-required" | "walk-in";
+
 // DropIn's common normalized session model — the one shape every municipal
 // data source adapter (lib/dropin/sources/*) must produce. The Search Engine
 // only ever operates on this; it never knows or cares which municipality or
@@ -93,9 +120,14 @@ export type Session = {
   officialSource: string;
   lastUpdated: string;
   verificationStatus: VerificationStatus;
-  // Optional and source-dependent — see RegistrationStatus above. Not
-  // rendered anywhere in the UI yet (Phase 3.5B is data-layer only); this
-  // exists so the data a future Decision Sheet action needs is already
-  // flowing through the pipeline before that UI work begins.
+  // Source-dependent, volatile — see RegistrationStatus above. Retained
+  // internally (Phase 3.5B) but deliberately NOT rendered in the UI
+  // (Phase 3.5C Part 12) — DropIn's snapshot refresh cadence cannot keep an
+  // "open"/"waitlist"/"closed" claim truthful between refreshes. Kept for
+  // potential future internal logic only.
   registrationStatus?: RegistrationStatus;
+  // The stable, user-facing participation requirement — see
+  // AttendanceRequirement above. Undefined means genuinely unknown, never
+  // a guess; only set where a source family has real structural evidence.
+  attendanceRequirement?: AttendanceRequirement;
 };

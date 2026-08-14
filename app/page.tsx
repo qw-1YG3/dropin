@@ -120,6 +120,39 @@ function ageRestrictionLabel(s: Session): string | undefined {
   return `Ages ${min}–${max}`;
 }
 
+// Phase 3.5C — the one stable, decision-relevant fact about how a session
+// admits participants (see Session.attendanceRequirement's own comment for
+// the evidence). Deliberately renders nothing for `undefined` (unknown) —
+// never a guess, never a "Check details" filler line standing in for
+// missing information, same discipline as ageRestrictionLabel above.
+function attendanceRequirementLabel(s: Session): string | undefined {
+  if (s.attendanceRequirement === "pre-registration-required") return "Pre-registration required";
+  if (s.attendanceRequirement === "walk-in") return "Walk-in";
+  return undefined;
+}
+
+// Three real CTA cases, per docs/PHASE_3_5C_ATTENDANCE_OFFICIAL_ACTION.md —
+// never "Join waitlist"/"Book now"/spots-remaining language, which would
+// imply DropIn has real-time booking authority it doesn't have.
+//   "Register"                — attendance is known to require registration
+//                                (currently: PerfectMind/Vaughan/Markham)
+//   "Official listing"        — attendance is known NOT to require it, so
+//                                the link is a plain info page, not a
+//                                registration flow (currently: unused, no
+//                                source both has a URL and confirmed
+//                                walk-in status yet, but Toronto could gain
+//                                one without this logic needing to change)
+//   "View official listing"   — attendance requirement is genuinely
+//                                unknown, so DropIn can't claim registration
+//                                either way (currently: ActiveCommunities/
+//                                Mississauga/Richmond Hill)
+function officialActionLabel(s: Session): string | undefined {
+  if (!s.officialUrl) return undefined;
+  if (s.attendanceRequirement === "pre-registration-required") return "Register";
+  if (s.attendanceRequirement === "walk-in") return "Official listing";
+  return "View official listing";
+}
+
 // Shared by the per-session Decision Sheet trust line and the aggregate
 // Results meta line — same relative-freshness math, one place to keep it
 // correct.
@@ -1494,13 +1527,24 @@ export default function SearchSurface() {
             <p className="mt-2 text-sm font-medium text-text-primary">{selectedSession.centre}</p>
             {selectedSession.address && <p className="mt-0.5 text-sm text-text-secondary">{selectedSession.address}</p>}
 
-            {/* Eligibility: price and/or age restriction, one line, omitted
-                entirely when neither is known rather than showing a blank
-                line. A wider gap above marks it as its own category too. */}
-            {(selectedSession.price || ageRestrictionLabel(selectedSession)) && (
-              <p className="mt-2 text-sm text-text-secondary">
-                {[selectedSession.price, ageRestrictionLabel(selectedSession)].filter(Boolean).join(" · ")}
-              </p>
+            {/* Eligibility: price and/or age restriction on one line, plus
+                the stable attendance requirement (Phase 3.5C) as its own
+                line directly beneath — same decision-fact cluster, same
+                typography, just one additional factual line rather than a
+                new section. Each piece is omitted entirely when unknown
+                rather than showing a blank or guessed line. A wider gap
+                above marks the cluster as its own category. */}
+            {(selectedSession.price || ageRestrictionLabel(selectedSession) || attendanceRequirementLabel(selectedSession)) && (
+              <div className="mt-2 space-y-1">
+                {(selectedSession.price || ageRestrictionLabel(selectedSession)) && (
+                  <p className="text-sm text-text-secondary">
+                    {[selectedSession.price, ageRestrictionLabel(selectedSession)].filter(Boolean).join(" · ")}
+                  </p>
+                )}
+                {attendanceRequirementLabel(selectedSession) && (
+                  <p className="text-sm text-text-secondary">{attendanceRequirementLabel(selectedSession)}</p>
+                )}
+              </div>
             )}
 
             <a
@@ -1528,7 +1572,7 @@ export default function SearchSurface() {
                   className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-border px-4 py-3 text-sm font-semibold text-text-primary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
                 >
                   <LinkIcon className="h-5 w-5" />
-                  <span className="text-center">Website</span>
+                  <span className="text-center">{officialActionLabel(selectedSession)}</span>
                   <span aria-hidden="true" />
                 </a>
               )}

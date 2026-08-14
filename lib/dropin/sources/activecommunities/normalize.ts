@@ -22,7 +22,9 @@
 // every event tested across both municipalities, so DropIn cannot back the
 // same "verified" claim it makes for Toronto's data. No attendanceMode
 // field is added here (see Part 6 of the Phase 3.2 report) — this project
-// deliberately does not invent a field just to fill it with "unknown".
+// deliberately does not invent a field just to fill it with "unknown". Same
+// reasoning still holds for Session.attendanceRequirement (Phase 3.5C) —
+// this family leaves it unset rather than guessing.
 import { getShortcutForActivity } from "../../activities";
 import { weekdayLabel, legacyDay, formatAbsoluteTime } from "../../time";
 import type { Session } from "../../types";

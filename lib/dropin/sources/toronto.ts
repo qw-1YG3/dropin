@@ -193,6 +193,12 @@ export function normalizeTorontoSessions(rawDropIn: RawDropInRecord[], rawLocati
       officialSource: OFFICIAL_SOURCE,
       lastUpdated: fetchedAtDateKey,
       verificationStatus: "verified",
+      // Phase 3.5C: this dataset IS the City of Toronto's own "Drop-in"
+      // program category, categorically distinct from its separately
+      // published Registered Programs data, and carries no registration
+      // field of any kind — the closest thing to a stable walk-in signal
+      // any current source has. See docs/PHASE_3_5C_ATTENDANCE_OFFICIAL_ACTION.md.
+      attendanceRequirement: "walk-in",
     });
   }
 

@@ -212,6 +212,21 @@ export function normalizePmClass(
     lastUpdated: fetchedAtDateKey,
     verificationStatus: "unverified",
     registrationStatus: mapRegistrationStatus(record.BookButtonText),
+    // A constant for the whole source family, NOT derived from the
+    // per-record, time-relative BookButtonText above (Phase 3.5C, Part 4 —
+    // explicitly warned against deriving this from volatile
+    // registrationStatus alone). Real evidence found this phase: a live
+    // check of BookButtonText's actual distribution shows it's dominated
+    // by "More Info" (70%+ of records) purely because that record's
+    // registration window hasn't opened yet — it flips to "Register Now!"
+    // as the date approaches, for the exact same session. What's stable
+    // across every record regardless of that timing is the structural
+    // fact that every one of them lives inside a PerfectMind BookMe4
+    // booking platform: DisplaySettings.ButtonName ("Register Now!" for
+    // Vaughan, "Register" for Markham) is a per-tenant constant labeling
+    // the platform's one and only path to attend, and zero sampled
+    // records anywhere mention a walk-in alternative.
+    attendanceRequirement: "pre-registration-required",
   };
 
   return { session };
