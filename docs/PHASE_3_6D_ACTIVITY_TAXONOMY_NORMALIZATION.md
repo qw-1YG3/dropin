@@ -138,6 +138,69 @@ The initial `stripEmbeddedTime` implementation assumed the am/pm period marker o
 
 ---
 
+## Source Truth Preservation
+
+**Preserve source truth; normalize presentation.** DropIn may normalize user-facing labels for consistency, but normalization must never overwrite the underlying official-source value.
+
+This section verifies that principle against the actual Phase 3.6C/3.6D implementation, not just asserts it. Findings below (§A–H correspond to the 8 verification points requested):
+
+### A/B/C — Where source truth lives, and that normalization never touches it
+
+There is no dedicated `sourceTitle`/`displayTitle` field pair in the `Session` model, and none was added this phase — the existing architecture already keeps the two fully separate, by construction:
+
+- **`Session.activity`** (`lib/dropin/types.ts`) is the canonical stored title, written once by each source adapter (`lib/dropin/sources/*/normalize.ts`, `toronto.ts`) directly from the raw source field and never reassigned anywhere afterward. Confirmed by an exhaustive search of the entire codebase (`grep -rn "\.activity\s*="` across `lib/`, `app/`, `scripts/`) for any mutation of the field: **zero matches** outside the initial construction of each `Session` object.
+- **`displayActivityName()`** (`lib/dropin/activities.ts`) is a pure function: `Session → string`. It reads `activity`/`ageMin`/`ageMax`/`startDateTime`/`endDateTime` and returns a *new* string; it does not and cannot mutate the `Session` it's given.
+- **Every call site is in the UI layer.** A repo-wide search for `displayActivityName` found exactly one caller module: `app/page.tsx` (result cards, chips, the results-summary label, Share text, the Decision Sheet title). It is called from **zero** files under `lib/dropin/sources/`, `scripts/refresh/`, or `lib/dropin/snapshot/` — the normalized name is never computed at ingestion time and never written into a snapshot. The canonical snapshot on disk (`data/canonical/<municipality>/latest.json`), and the `Session` objects served by `/api/sessions`, always carry the original, un-normalized `activity` value; `displayActivityName` recomputes the display string fresh, on every render, from that stored value.
+
+### D/E — Presentation layer usage, without destroying source truth
+
+Confirmed via the same call-site search: Result Cards, the Decision Sheet, activity chips (`filterChipActivities`), the results-summary/empty-state label (`activityDisplayLabel`), and Share text all route through `displayActivityName`. None of them ever writes back to `session.activity` — they read it, compute a display string, and render that string. The original value is available to any other consumer in the same request/render simply by reading `session.activity` directly, which is exactly what search does (next point).
+
+### F — Search uses original source wording
+
+`lib/dropin/search-intent.ts`'s `parseQuery`/`matchActivity` builds its entire known-activity index from `sessions.map(s => s.activity)` — the raw field, never the normalized one. `displayActivityName` is not imported by this file. Confirmed unchanged since 3.6C: queries using original source wording (`"adult pickleball"`, `"drop in badminton"`) still resolve correctly, verified live in both phases.
+
+### G — Debugging and audits can recover the original title
+
+The canonical snapshot file (`data/canonical/<municipality>/latest.json`) is a real, on-disk, directly-`grep`-able artifact whose `sessions[].activity` field is the source-of-truth value every part of the app actually reads — no normalization has ever been applied to it. A snapshot `previous.json` is kept alongside `latest.json` for every municipality (Phase 3.3 infrastructure, unrelated to this phase), so the last two generations of canonical values are always diffable. One layer below that, `data/raw/<municipality>/latest.json` holds the true, verbatim API/scrape response for every source family, also with its own `previous.json`.
+
+**One honest nuance found while verifying this, not previously called out this precisely:** for six of the seven municipalities (Toronto, Mississauga, Richmond Hill, Vaughan, Markham, Newmarket), `Session.activity` is byte-identical to the raw source field — confirmed directly, e.g. Vaughan's raw PerfectMind API record has `EventName: "Adult Pickleball"` and the canonical `Session.activity` for that exact record is `"Adult Pickleball"`, unchanged. **Aurora is the one exception**, and it predates this phase: Phase 3.6B's `cleanDropInTitle()` (`lib/dropin/sources/activecommunities/normalize.ts`) strips a "Drop In - " prefix and a trailing per-week date range from Aurora's raw catalog title *before* it's stored as `Session.activity`, because the true raw title names one specific calendar week (e.g. `"Drop In - Adult Pickleball (AFLC) - August 15 - 21"`) rather than the stable recurring program — using it unmodified as the canonical identity would make the same real program look like a different title every week. Traced end-to-end against a real record this phase:
+
+```
+data/raw/aurora/latest.json (truly verbatim ActiveCommunities API field):
+  "Drop In - Adult Pickleball (AFLC) - August 15 - 21"
+        ↓  Phase 3.6B ingestion-time cleanup (cleanDropInTitle, NOT part of 3.6C/3.6D)
+data/canonical/aurora/latest.json → Session.activity:
+  "Adult Pickleball (AFLC)"
+        ↓  Phase 3.6C/3.6D displayActivityName (render-time only, never stored)
+UI display title:
+  "Pickleball (AFLC)"
+```
+
+This is a pre-existing, already-documented (in `normalize.ts`'s own comments since Phase 3.6B), and necessary ingestion-time transform — not something Phase 3.6C or 3.6D introduced, and not something either phase could have avoided, since it happens one full pipeline stage before `displayActivityName` ever runs. It does **not** constitute source-data loss under the principle being verified here: the truly verbatim original remains fully recoverable, just one layer deeper (the raw snapshot) than for every other municipality. Flagged here for transparency rather than left implicit, since the request specifically asked for rigor on this point — not treated as a bug to fix, since nothing is irrecoverably destroyed and the transform is required for canonical-ID stability, not a presentation choice.
+
+### H — officialUrl stays associated with the underlying session
+
+`officialUrl` is an independent sibling field on the same `Session` object — it is never derived from, read by, or written by `displayActivityName` or any other part of the normalization pipeline. Confirmed against the same real Aurora record traced above: `officialUrl: "https://ca.apm.activecommunities.com/auroraontario/ActiveNet_Home?FileName=onlineDCProgramDetail.sdi&dcprogram_id=3885..."` is present and correct regardless of whether the title displayed is the raw source title, the canonical value, or the normalized display name.
+
+### Auditability — representative source → canonical → display chains
+
+| Municipality | Raw source field | Canonical `Session.activity` | Displayed as |
+|---|---|---|---|
+| Vaughan | `EventName: "Adult Pickleball"` | `Adult Pickleball` | **Pickleball** |
+| Mississauga | (ActiveCommunities `event.title`) `"Drop In Badminton"` | `Drop In Badminton` | **Badminton** |
+| Markham | (PerfectMind `EventName`) `"Drop-In Yoga"` | `Drop-In Yoga` | **Yoga** |
+| Toronto | (Open Data `Course Title`) `"Badminton with Family"` | `Badminton with Family` | **Badminton with Family** (unchanged — meaningful subtype) |
+| Aurora | (ActiveCommunities catalog `name`) `"Drop In - Adult Pickleball (AFLC) - August 15 - 21"` | `Adult Pickleball (AFLC)` (Phase 3.6B ingestion cleanup, see above) | **Pickleball (AFLC)** |
+
+For the first four rows, canonical `Session.activity` is byte-identical to the real raw field pulled directly from `data/raw/<municipality>/latest.json` this phase — confirmed, not assumed. `sourceScheduleId` (e.g. `vaughan-133861`, `mississauga-128559`, `markham-323978`) namespaces the same real program across refreshes and is likewise untouched by display normalization.
+
+### Conclusion
+
+The existing architecture already satisfies "preserve source truth; normalize presentation" — verified by direct inspection, not assumption. No dedicated `sourceTitle`/`displayTitle` field pair was introduced: `Session.activity` (stored, canonical, source-derived) and `displayActivityName(session)` (computed, render-only, derived) already provide exactly that separation, and duplicating `activity` into a second field would be redundant with what the snapshot already stores. No production code was changed this phase — this was a verification and documentation pass only, per the stop condition.
+
+---
+
 ## Answer to the closing question
 
 **Yes.** After this pass, cross-source naming inconsistency for DropIn's core recreation-activity vocabulary — Badminton, Basketball, Pickleball, Table Tennis, Yoga, Volleyball, Swimming, Skating, Fitness, Aquafit — is now small and specific rather than pervasive: 27.4% of all sessions were touched, every remaining un-normalized case falls into one of a short, named, and now-documented list (missing age evidence, a real title/structured-data mismatch just discovered and correctly left alone, a facility-branch abbreviation, a deliberately out-of-scope "Youth" qualifier, or genuinely meaningful subtype wording). There is no longer an obvious, large class of redundant noise left to chase pre-launch. Further normalization from here — a "Youth" pass, single-start-time stripping, "MSC-" abbreviation expansion, or resolving the Newmarket 10-minute time discrepancy — would be speculative refinement rather than fixing a visible product problem, and is better prioritized by what real users actually notice or complain about than by continuing to mine the dataset for smaller and smaller residual inconsistencies.
