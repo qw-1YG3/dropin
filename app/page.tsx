@@ -16,7 +16,7 @@ import {
   SearchIcon,
   ShareIcon,
 } from "./_components/icons";
-import { ACTIVITY_GROUPS, getShortcutForActivity, SHORTCUTS } from "@/lib/dropin/activities";
+import { ACTIVITY_GROUPS, displayActivityName, getShortcutForActivity, SHORTCUTS } from "@/lib/dropin/activities";
 import { getDisplayDistrict } from "@/lib/dropin/districts";
 import { MUNICIPALITIES } from "@/lib/dropin/municipalities";
 import { parseQuery, sessionMatchesLocation, type DetectedLocation } from "@/lib/dropin/search-intent";
@@ -263,7 +263,7 @@ function SessionCard({
         className="w-full rounded-xl border border-border/70 bg-white px-4 py-2.5 text-left shadow-[0_1px_2px_rgba(47,43,39,0.04)] transition-all duration-200 ease-out hover:-translate-y-px hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] active:scale-[0.99] motion-safe:animate-[cardIn_220ms_ease-out_both]"
       >
         <div className="flex items-center justify-between gap-3">
-          <p className="truncate text-[15px] font-bold leading-tight text-text-primary">{s.activity}</p>
+          <p className="truncate text-[15px] font-bold leading-tight text-text-primary">{displayActivityName(s)}</p>
           {eligibility && <span className="flex-shrink-0 text-xs text-text-secondary">{eligibility}</span>}
         </div>
         <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-text-secondary">
@@ -285,7 +285,7 @@ function SessionCard({
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-[18px] font-bold leading-tight text-text-primary">{s.activity}</p>
+          <p className="text-[18px] font-bold leading-tight text-text-primary">{displayActivityName(s)}</p>
           <p
             className={`mt-0.5 flex items-center gap-1.5 text-sm ${
               isLive ? "font-semibold text-sage-text" : "font-medium text-text-secondary"
@@ -613,9 +613,15 @@ export default function SearchSurface() {
   // Filter chips reflect activities actually present in the current
   // activity+location scope, not just the raw parsed match — this way a
   // pure-location search ("North York") still offers useful chips to
-  // refine by, instead of only ever showing "All".
+  // refine by, instead of only ever showing "All". Built from the
+  // normalized display name (Phase 3.6C), not the raw source title —
+  // otherwise cross-municipality variants of the same activity (e.g.
+  // Vaughan's "Adult Pickleball" vs. Toronto's "Pickleball") would each
+  // claim their own redundant chip instead of one shared "Pickleball" chip,
+  // and clicking one would show a card titled differently than the chip
+  // that was clicked.
   const filterChipActivities = useMemo(
-    () => Array.from(new Set(baseResults.map((s) => s.activity))),
+    () => Array.from(new Set(baseResults.map((s) => displayActivityName(s)))),
     [baseResults],
   );
 
@@ -625,7 +631,7 @@ export default function SearchSurface() {
   const resultsForSelectedDate = useMemo(() => {
     return baseResults.filter((s) => {
       if (s.date !== selectedDate) return false;
-      if (activeFilter !== "All" && s.activity !== activeFilter) return false;
+      if (activeFilter !== "All" && displayActivityName(s) !== activeFilter) return false;
       return true;
     });
   }, [baseResults, activeFilter, selectedDate]);
@@ -650,13 +656,30 @@ export default function SearchSurface() {
   // chip narrows the scope further, so it takes priority over the broader
   // matched-activity set; a multi-activity match (e.g. "swim" resolving to
   // several real course titles) collapses to its shortcut label ("Swimming")
-  // rather than every individual title.
+  // rather than every individual title. `activeFilter` is already a
+  // normalized display name (filterChipActivities is built from
+  // displayActivityName), so it needs no further treatment; the two
+  // fallback branches below independently route through
+  // displayActivityName too (Phase 3.6C) — without it, a query that
+  // resolves to exactly one raw title, or to several with no pre-existing
+  // shortcut label (Volleyball/Skating/Group Fitness have none), would show
+  // a raw source title here ("Drop-In Group Fitness: Older Adult") even
+  // though every card/chip on the same screen already shows the
+  // normalized one.
   const activityDisplayLabel = useMemo(() => {
     if (activeFilter !== "All") return activeFilter;
-    if (matchedActivities.length === 1) return matchedActivities[0];
-    if (matchedActivities.length > 1) return getShortcutForActivity(matchedActivities[0]) ?? matchedActivities[0];
+    if (matchedActivities.length === 1) {
+      const representative = sessions.find((s) => s.activity === matchedActivities[0]);
+      return representative ? displayActivityName(representative) : matchedActivities[0];
+    }
+    if (matchedActivities.length > 1) {
+      const shortcut = getShortcutForActivity(matchedActivities[0]);
+      if (shortcut) return shortcut;
+      const representative = sessions.find((s) => s.activity === matchedActivities[0]);
+      return representative ? displayActivityName(representative) : matchedActivities[0];
+    }
     return undefined;
-  }, [activeFilter, matchedActivities]);
+  }, [activeFilter, matchedActivities, sessions]);
 
   // Freshness of what's actually on screen, not an arbitrary session from
   // the whole combined pool. Phase 3.3 gave Toronto, Mississauga, and
@@ -871,13 +894,14 @@ export default function SearchSurface() {
   // "Copied" confirmation on the button itself) everywhere else — no new
   // UI, just a real action behind a button that previously did nothing.
   async function handleShare(s: Session) {
-    const summary = [`${s.activity} — ${s.centre}`, timeLabel(s, computeStatus(s, liveNow), now), s.officialUrl].filter(Boolean).join("\n");
+    const displayName = displayActivityName(s);
+    const summary = [`${displayName} — ${s.centre}`, timeLabel(s, computeStatus(s, liveNow), now), s.officialUrl].filter(Boolean).join("\n");
 
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
         await navigator.share({
-          title: s.activity,
-          text: `${s.activity} — ${s.centre}`,
+          title: displayName,
+          text: `${displayName} — ${s.centre}`,
           ...(s.officialUrl ? { url: s.officialUrl } : {}),
         });
       } catch {
@@ -1494,7 +1518,7 @@ export default function SearchSurface() {
             return (
               <h2 id="quick-action-title" className="flex min-w-0 items-center gap-2 text-[18px] font-bold leading-tight text-text-primary">
                 {ActivityIcon && <ActivityIcon className="h-5 w-5 flex-shrink-0 text-text-secondary" />}
-                {selectedSession.activity}
+                {displayActivityName(selectedSession)}
               </h2>
             );
           })()
