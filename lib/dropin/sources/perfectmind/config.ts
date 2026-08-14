@@ -7,16 +7,33 @@
 // PerfectMind municipality means adding one more entry to
 // PERFECTMIND_MUNICIPALITIES — not touching client.ts or normalize.ts.
 //
-// Category scope is deliberately NOT exhaustive. Markham's live widget
-// exposes 13 categories total (Activities for Age 55+, Adapted, Aquafit,
-// Art, four separate Group Fitness subcategories, Quick Fitness, Sensory
-// Room/Indoor Playground, Skating, Sports & Activities, Swimming, Tennis
-// Round Robins); Vaughan exposes 3 (Sports, Fitness Centre, Swimming &
-// Aquafitness). Phase 3.5B's production scope is 3 comparable categories per
-// city — matching Vaughan's full active taxonomy and a representative,
-// evidence-backed subset of Markham's — consistent with Phase 3.4's finding
-// that not every category on a shared platform necessarily belongs in
-// DropIn. Expanding either city's category list is a config-only change.
+11// Category scope is deliberately NOT exhaustive — consistent with Phase
+// 3.4's finding that not every category on a shared platform necessarily
+// belongs in DropIn's "drop-in active recreation" product scope, not
+// "all municipal recreation programming." Vaughan exposes 3 categories
+// total, all included (its full active taxonomy).
+//
+// Markham (Phase 3.5D full audit): the live widget currently exposes 14
+// named categories, of which only 11 are hyperlinked/live (the other 3 —
+// Adapted, Quick Fitness, Tennis Round Robins — render as plain text with
+// no calendarId, meaning zero current sessions; there is nothing to
+// session-validate against, so they're deliberately left out rather than
+// guessed at, and should be re-audited once/if they go live). Of the 11
+// live categories, 10 are included here — real, sampled, "Drop-In"-
+// prefixed, time-boxed, real-facility, real-price sessions that fit active
+// recreation (Sports & Activities, Swimming, Skating, Activities for Age
+// 55+, Aquafit, all four Group Fitness subcategories, Sensory Room/Indoor
+// Playground). "Art" (real drop-in life-drawing sessions at Varley Art
+// Gallery) was excluded: genuinely drop-in, but a sedentary studio class,
+// not active recreation. See docs/PHASE_3_5D_MARKHAM_FULL_COVERAGE.md for
+// the full per-category evidence.
+//
+// Known nuance, not a reason to exclude: Markham's own booking-widget
+// banner states "Aquafit is in-person only" — confirmed live, every
+// sampled Aquafit record (including same-day ones) shows "More Info"
+// rather than "Register Now!", unlike every other category. Aquafit is
+// still real, drop-in, active recreation — this only affects how a user
+// completes registration, not whether the category belongs in DropIn.
 export type PerfectMindCategoryConfig = {
   // Human-readable label, used only for logging/health output.
   name: string;
@@ -75,6 +92,13 @@ export const PERFECTMIND_MUNICIPALITIES: PerfectMindMunicipalityConfig[] = [
       { name: "Sports & Activities", calendarId: "491a603e-4043-4ab6-b04d-8fac51edbcfc", category: "Sports & Activities" },
       { name: "Swimming", calendarId: "39bd5c76-e07f-43f3-af24-c6969091dbb4", category: "Swimming" },
       { name: "Skating", calendarId: "ecf5202d-4c97-4f89-b4e3-42966a1cc453", category: "Skating" },
+      { name: "Activities for Age 55+", calendarId: "018e7083-d228-4af0-aab1-6d7958b3c8d4", category: "Activities for Age 55+" },
+      { name: "Aquafit", calendarId: "d4d891dd-9e45-474b-97c4-e43c8f8fe3b8", category: "Aquafit" },
+      { name: "Group Fitness: Cardio", calendarId: "3cad5e4f-9aa0-430b-b2d4-8f75e0984e39", category: "Group Fitness: Cardio" },
+      { name: "Group Fitness: Mind & Body", calendarId: "1da4e633-1e1c-4639-8aed-aaeaef5ebb2d", category: "Group Fitness: Mind & Body" },
+      { name: "Group Fitness: Strength Training", calendarId: "f0a1e11c-56e9-4d9b-996d-ef8201cf6ed8", category: "Group Fitness: Strength Training" },
+      { name: "Group Fitness: Total Body Workout", calendarId: "c8d9404a-4ccd-465d-9a92-16a071baa76d", category: "Group Fitness: Total Body Workout" },
+      { name: "Sensory Room / Indoor Playground", calendarId: "1b657632-f24f-42b3-bdb4-3043e211da12", category: "Sensory Room / Indoor Playground" },
     ],
   },
 ];
