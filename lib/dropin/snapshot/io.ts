@@ -1,4 +1,4 @@
-1// Atomic snapshot read/write (Phase 3.3). Phase 3.3B adds one seam here,
+// Atomic snapshot read/write (Phase 3.3). Phase 3.3B adds one seam here,
 // no behavior change: a `SnapshotStorage` interface describes what any
 // backend must support, with `LocalFilesystemSnapshotStorage` as the only
 // implementation today. Every call site (refresh scripts, the app's read

@@ -1,13 +1,13 @@
 // GTA-wide target coverage. "available" means a real adapter is registered
 // in lib/dropin/sources/ and actually returns sessions for it — Toronto
-// (its own static-snapshot adapter); Mississauga and Richmond Hill (both
-// configured tenants of the shared ActiveCommunities adapter — see
-// lib/dropin/sources/activecommunities/); and, as of Phase 3.5B, Vaughan
-// and Markham (both configured tenants of the shared PerfectMind adapter —
-// see lib/dropin/sources/perfectmind/). The rest are real target
-// municipalities with no wired data source yet: Brampton/Burlington/
-// Hamilton also sit behind a PerfectMind/Xplor booking widget, but "same
-// platform as Vaughan/Markham" is not "already available" — each tenant
+// (its own static-snapshot adapter); Mississauga, Richmond Hill, and, as of
+// Phase 3.6B, Aurora (all configured tenants of the shared ActiveCommunities
+// adapter — see lib/dropin/sources/activecommunities/); and Vaughan,
+// Markham, and, as of Phase 3.6B, Newmarket (all configured tenants of the
+// shared PerfectMind adapter — see lib/dropin/sources/perfectmind/). The
+// rest are real target municipalities with no wired data source yet:
+// Brampton/Burlington/Hamilton also sit behind a PerfectMind/Xplor booking
+// widget, but "same platform" is not "already available" — each tenant
 // still needs its own confirmed config (host, widget id, category calendar
 // ids) before it's real coverage, and Ajax/Whitby/Oakville/Pickering/Milton
 // haven't been integrated yet even though some are the same
@@ -27,6 +27,8 @@ export const MUNICIPALITIES: Municipality[] = [
   { name: "Markham", status: "available" },
   { name: "Vaughan", status: "available" },
   { name: "Richmond Hill", status: "available" },
+  { name: "Newmarket", status: "available" },
+  { name: "Aurora", status: "available" },
   { name: "Brampton", status: "not-yet-available" },
   { name: "Oakville", status: "not-yet-available" },
   { name: "Burlington", status: "not-yet-available" },

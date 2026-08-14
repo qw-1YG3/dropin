@@ -152,45 +152,99 @@ export type AcActivityItem = {
   age_description?: string;
   age_min_year?: number;
   age_max_year?: number;
+  // The rest are only populated/used by the two-tier drop-in retrieval path
+  // (Phase 3.6B, Aurora) — real fields confirmed present on every sampled
+  // record, unused (left undefined by callers) for the age-enrichment path.
+  detail_url?: string;
+  action_link?: { href?: string };
+  location?: { label?: string };
+  date_range_start?: string; // "2026-08-15 00:00:00"
+};
+
+export type AcActivitySearchResult = {
+  items: AcActivityItem[];
+  totalRecords: number;
+  recordsPerPage: number;
 };
 
 // A different catalog from getAcEvents — registered programs/courses, not
 // dated drop-in occurrences (see docs/PHASE_3_1_ACTIVECOMMUNITIES_POC.md §7).
-// Used only for best-effort age enrichment (../age-join.ts); never as the
-// primary session source. Capped at 20 results/page by the server itself —
-// confirmed directly, not configurable via the request.
-export async function searchAcActivities(session: AcSession, params: { keyword: string }): Promise<AcActivityItem[]> {
-  const json = await acPost<{ body: { activity_items: AcActivityItem[] } }>(session, "activities/list", {
-    activity_search_pattern: {
-      skills: [],
-      time_after_str: "",
-      days_of_week: null,
-      activity_select_param: 2,
-      center_ids: [],
-      time_before_str: "",
-      open_spots: null,
-      activity_id: null,
-      activity_category_ids: [],
-      date_before: null,
-      min_age: null,
-      date_after: null,
-      activity_type_ids: [],
-      site_ids: [0],
-      for_map: false,
-      geographic_area_ids: [],
-      drop_in: 1,
-      season_ids: [],
-      activity_department_ids: [],
-      activity_other_category_ids: [],
-      child_season_ids: [],
-      activity_keyword: params.keyword,
-      instructor_ids: [],
-      max_age: null,
-      is_drop_in: true,
-      custom_price_from: null,
-      custom_price_to: null,
+// Used for best-effort age enrichment (../age-join.ts) AND, since Phase
+// 3.6B, as the primary source for tenants whose real drop-in content lives
+// here instead of on the dated onlinecalendar feed (see ../index.ts and
+// Session.attendanceRequirement's own reasoning for why that's a genuinely
+// different, evidence-backed retrieval path, not a guess). Capped at 20
+// results/page by the server itself — confirmed directly; the true total is
+// still reported via `page_info.total_records`, used by the two-tier path
+// to detect a genuine completion boundary (see ../index.ts).
+export async function searchAcActivities(session: AcSession, params: { keyword: string }): Promise<AcActivitySearchResult> {
+  const json = await acPost<{ headers: { page_info?: { total_records?: number; total_records_per_page?: number } }; body: { activity_items: AcActivityItem[] } }>(
+    session,
+    "activities/list",
+    {
+      activity_search_pattern: {
+        skills: [],
+        time_after_str: "",
+        days_of_week: null,
+        activity_select_param: 2,
+        center_ids: [],
+        time_before_str: "",
+        open_spots: null,
+        activity_id: null,
+        activity_category_ids: [],
+        date_before: null,
+        min_age: null,
+        date_after: null,
+        activity_type_ids: [],
+        site_ids: [0],
+        for_map: false,
+        geographic_area_ids: [],
+        drop_in: 1,
+        season_ids: [],
+        activity_department_ids: [],
+        activity_other_category_ids: [],
+        child_season_ids: [],
+        activity_keyword: params.keyword,
+        instructor_ids: [],
+        max_age: null,
+        is_drop_in: true,
+        custom_price_from: null,
+        custom_price_to: null,
+      },
+      activity_transfer_pattern: {},
     },
-    activity_transfer_pattern: {},
+  );
+  return {
+    items: json.body.activity_items,
+    totalRecords: json.headers.page_info?.total_records ?? json.body.activity_items.length,
+    recordsPerPage: json.headers.page_info?.total_records_per_page ?? json.body.activity_items.length,
+  };
+}
+
+export type AcProgramSession = {
+  session_id: number;
+  session_name: string;
+  first_date: string; // "2026-08-15"
+  last_date: string;
+  beginning_time: string; // "10:15:00"
+  ending_time: string;
+  days_of_week: string;
+};
+
+// Second tier of the drop-in retrieval path (Phase 3.6B): a real
+// `activities/list` "week" entry (e.g. "Drop In - Adult Pickleball (AFLC) -
+// August 15 - 21") has no per-occurrence date/time on the item itself —
+// only this sub-resource expands it into its real dated/timed occurrences.
+// Confirmed reachable with the same session/cookie already established by
+// createAcSession, no separate handshake needed.
+export async function getAcProgramSessions(session: AcSession, programId: number): Promise<AcProgramSession[]> {
+  const res = await fetch(`${BASE}/${session.tenant}/rest/program/${programId}/sessions?locale=en-US`, {
+    headers: { "User-Agent": USER_AGENT, "X-Requested-With": "XMLHttpRequest", Referer: session.pageUrl, Cookie: session.cookieHeader() },
   });
-  return json.body.activity_items;
+  session.absorb(res);
+  if (!res.ok) {
+    throw new Error(`activecommunities client: GET program/${programId}/sessions failed for tenant "${session.tenant}": HTTP ${res.status}`);
+  }
+  const json = (await res.json()) as { body: { program_sessions: AcProgramSession[] } };
+  return json.body.program_sessions;
 }

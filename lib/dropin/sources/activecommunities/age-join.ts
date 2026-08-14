@@ -75,7 +75,7 @@ export async function buildAgeLookup(session: AcSession, distinctTitles: string[
 
   await runWithConcurrency(titles, CONCURRENCY, async (title) => {
     try {
-      const items = await searchAcActivities(session, { keyword: title });
+      const { items } = await searchAcActivities(session, { keyword: title });
       for (const item of items) {
         if (!lookup.has(item.id)) lookup.set(item.id, toAgeInfo(item));
       }

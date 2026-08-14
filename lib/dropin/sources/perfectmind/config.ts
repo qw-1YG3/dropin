@@ -7,7 +7,7 @@
 // PerfectMind municipality means adding one more entry to
 // PERFECTMIND_MUNICIPALITIES — not touching client.ts or normalize.ts.
 //
-11// Category scope is deliberately NOT exhaustive — consistent with Phase
+// Category scope is deliberately NOT exhaustive — consistent with Phase
 // 3.4's finding that not every category on a shared platform necessarily
 // belongs in DropIn's "drop-in active recreation" product scope, not
 // "all municipal recreation programming." Vaughan exposes 3 categories
@@ -65,6 +65,22 @@ export type PerfectMindMunicipalityConfig = {
   categories: PerfectMindCategoryConfig[];
 };
 
+// Newmarket (Phase 3.6B, audited per Phase 3.6A's platform discovery): the
+// live widget exposes 9 categories. 6 included — Fitness, Preschool,
+// Skating, Sports, Swimming, Indoor Skate Park — all real, sampled,
+// time-boxed drop-in sessions fitting active recreation (Zumba/Barre/Aqua
+// Fitness, Parent & Tot Drop In, Public Skate/Shinny, Badminton/Soccer/
+// Pickleball/Basketball/Volleyball/Fencing, Lane/Public Swim, age-banded
+// skate park sessions). 2 excluded — "Arts & Culture" (out of scope by
+// category name, and empty at audit time) and "Adult 55+" (sampled real
+// titles were majority non-active social/hobby content — Euchre, Chess,
+// Wood Carvers, Shuffleboard, Seniors Lunches, Mah-Jong — outweighing the
+// two genuinely active titles, "Badminton" and "Archery (Indoor)," a
+// worse ratio than Markham's own Age 55+ category, which tipped the other
+// way). 1 deferred — "Inclusion" (ambiguous by name, zero live sessions
+// to validate against at audit time — same reasoning as Markham's
+// Adapted/Quick Fitness/Tennis Round Robins). See
+// docs/PHASE_3_6B_AURORA_NEWMARKET_PRODUCTION.md for full evidence.
 export const PERFECTMIND_MUNICIPALITIES: PerfectMindMunicipalityConfig[] = [
   {
     municipality: "Vaughan",
@@ -99,6 +115,23 @@ export const PERFECTMIND_MUNICIPALITIES: PerfectMindMunicipalityConfig[] = [
       { name: "Group Fitness: Strength Training", calendarId: "f0a1e11c-56e9-4d9b-996d-ef8201cf6ed8", category: "Group Fitness: Strength Training" },
       { name: "Group Fitness: Total Body Workout", calendarId: "c8d9404a-4ccd-465d-9a92-16a071baa76d", category: "Group Fitness: Total Body Workout" },
       { name: "Sensory Room / Indoor Playground", calendarId: "1b657632-f24f-42b3-bdb4-3043e211da12", category: "Sensory Room / Indoor Playground" },
+    ],
+  },
+  {
+    municipality: "Newmarket",
+    host: "newmarket.perfectmind.com",
+    sitePrefix: "",
+    widgetId: "15f6af07-39c5-473e-b053-96653f77a406",
+    officialSource: "Town of Newmarket Recreation (PerfectMind)",
+    officialMunicipalUrl: "https://www.newmarket.ca/schedules",
+    idPrefix: "newmarket",
+    categories: [
+      { name: "Fitness", calendarId: "fbaf60eb-a810-4cae-9269-908329c23749", category: "Fitness" },
+      { name: "Preschool", calendarId: "a676fa83-d326-461c-b378-4d1200d8a114", category: "Preschool" },
+      { name: "Skating", calendarId: "7df1a9b7-7d8f-4fbb-8359-1423ea1ef5e8", category: "Skating" },
+      { name: "Sports", calendarId: "96370493-6148-4ba0-a655-99186ec6b29a", category: "Sports" },
+      { name: "Swimming", calendarId: "d1df7882-40a8-45dc-8e7c-cfb2b6a9a930", category: "Swimming" },
+      { name: "Indoor Skate Park", calendarId: "29ce1e64-7511-4cb7-af47-0f33e30b8b63", category: "Indoor Skate Park" },
     ],
   },
 ];
