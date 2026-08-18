@@ -109,12 +109,28 @@ function secondaryActionCount(s: Session) {
   return 1 + (s.officialUrl ? 1 : 0) + (s.phone ? 1 : 0);
 }
 
+// Phase 4.1A — several source systems encode "no meaningful upper age
+// limit" as a specific high numeric sentinel rather than leaving ageMax
+// undefined: Toronto's own raw open data literally publishes "Age Max": 98
+// for general-audience programs (Roller Skating ageMin 8, Drag Open Studio
+// ageMin 13), while every genuine bounded adult range in that same dataset
+// tops out at 64 (Volleyball, ageMin 19). The ActiveCommunities/PerfectMind
+// family (Mississauga, Richmond Hill, Aurora, Vaughan, Markham, Newmarket)
+// shows the identical pattern one step higher, at 99 (Mississauga also 100)
+// against adult drop-in activities (Adult Pickleball, Adult Badminton,
+// Group Fitness) — again with a clean, evidence-confirmed gap to the next
+// real bounded value in every one of those datasets. This is a
+// presentation-only reinterpretation — source/canonical ageMax is never
+// modified — see docs/PHASE_4_1A_AGE_DISPLAY_NORMALIZATION.md for the full
+// per-municipality audit.
+const OPEN_ENDED_AGE_MAX_THRESHOLD = 98;
+
 // A real eligibility gate, not a nice-to-have — but "0 to no max" means the
 // source data simply isn't restricting this session, so it renders as
 // nothing rather than a meaningless "Ages 0+".
 function ageRestrictionLabel(s: Session): string | undefined {
   const min = s.ageMin ?? 0;
-  const max = s.ageMax;
+  const max = s.ageMax !== undefined && s.ageMax >= OPEN_ENDED_AGE_MAX_THRESHOLD ? undefined : s.ageMax;
   if (min <= 0 && max === undefined) return undefined;
   if (max === undefined) return `Ages ${min}+`;
   if (min <= 0) return `Up to age ${max}`;
