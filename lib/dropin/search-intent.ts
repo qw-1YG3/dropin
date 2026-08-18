@@ -111,6 +111,26 @@ function matchActivity(text: string, knownActivityNames: string[]): string[] {
   return Array.from(new Set([...shortcutGroup, ...substringMatches]));
 }
 
+// Phase 4.2, Part 13 — "near me"/"nearby"/"near you" carry no location
+// information parseQuery can act on today (no reverse-geocoding, no
+// implicit municipality), so left in the query they only ever produce a
+// dead-end "no results" (neither an activity nor a location match). This
+// is deliberately NOT a new DetectedLocation variant and does not touch
+// geolocation permission at all — it's a small, literal text trim so
+// "pickleball near me" resolves the same as "pickleball" (an activity-only
+// search across every municipality), and any real distance-to-facility
+// value it then gets comes entirely from whatever UserLocation state
+// already exists in the UI layer, independently. A narrow, explicit
+// suffix match — not a general NLP pass — deliberately only strips the
+// phrase at the end of the query, where it's actually used in real
+// English ("pickleball near me"), not embedded mid-phrase where it could
+// coincidentally collide with real content.
+const NEAR_ME_SUFFIX = /\s*\b(?:near me|nearby|near you)\b\s*$/i;
+
+export function stripNearMeLanguage(query: string): string {
+  return query.replace(NEAR_ME_SUFFIX, "").trim();
+}
+
 // Follows docs/SEARCH_ENGINE.md's Mixed Query Parsing: segment the query and
 // prefer the split that yields exactly one Activity match and one Location
 // match over any other combination. Falls back to treating the whole query

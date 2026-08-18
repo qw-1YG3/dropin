@@ -17,9 +17,10 @@ import {
   ShareIcon,
 } from "./_components/icons";
 import { ACTIVITY_GROUPS, displayActivityName, getShortcutForActivity, SHORTCUTS } from "@/lib/dropin/activities";
+import { haversineKm, formatDistanceKm } from "@/lib/dropin/distance";
 import { getDisplayDistrict } from "@/lib/dropin/districts";
 import { MUNICIPALITIES } from "@/lib/dropin/municipalities";
-import { parseQuery, sessionMatchesLocation, type DetectedLocation } from "@/lib/dropin/search-intent";
+import { parseQuery, sessionMatchesLocation, stripNearMeLanguage, type DetectedLocation } from "@/lib/dropin/search-intent";
 import {
   addDays,
   clockLabel,
@@ -131,26 +132,26 @@ function attendanceRequirementLabel(s: Session): string | undefined {
   return undefined;
 }
 
-// Three real CTA cases, per docs/PHASE_3_5C_ATTENDANCE_OFFICIAL_ACTION.md —
+// Two real CTA cases, per docs/PHASE_3_5C_ATTENDANCE_OFFICIAL_ACTION.md —
 // never "Join waitlist"/"Book now"/spots-remaining language, which would
 // imply DropIn has real-time booking authority it doesn't have.
-//   "Register"                — attendance is known to require registration
-//                                (currently: PerfectMind/Vaughan/Markham)
-//   "Official listing"        — attendance is known NOT to require it, so
-//                                the link is a plain info page, not a
-//                                registration flow (currently: unused, no
-//                                source both has a URL and confirmed
-//                                walk-in status yet, but Toronto could gain
-//                                one without this logic needing to change)
-//   "View official listing"   — attendance requirement is genuinely
-//                                unknown, so DropIn can't claim registration
-//                                either way (currently: ActiveCommunities/
-//                                Mississauga/Richmond Hill)
+//   "Register"           — attendance is known to require registration
+//                           (currently: PerfectMind/Vaughan/Markham)
+//   "Official listing"   — covers both the "known NOT to require it"
+//                           case (currently unused — no source both has a
+//                           URL and confirmed walk-in status yet) and the
+//                           "genuinely unknown" case (currently:
+//                           ActiveCommunities/Mississauga/Richmond Hill) —
+//                           collapsed to one label (Decision Sheet polish
+//                           pass) since neither case can honestly claim
+//                           "Register," and distinguishing "the listing is
+//                           definitely not registration" from "we don't
+//                           know" isn't a distinction the label itself
+//                           needs to carry.
 function officialActionLabel(s: Session): string | undefined {
   if (!s.officialUrl) return undefined;
   if (s.attendanceRequirement === "pre-registration-required") return "Register";
-  if (s.attendanceRequirement === "walk-in") return "Official listing";
-  return "View official listing";
+  return "Official listing";
 }
 
 // Shared by the per-session Decision Sheet trust line and the aggregate
@@ -173,6 +174,107 @@ function directionsUrl(s: Session): string {
   }
   const parts = [s.address, s.centre, s.municipality].filter(Boolean);
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parts.join(", "))}`;
+}
+
+// Phase 4.2 — real user geolocation, kept entirely separate from
+// persistentLocation/locationOverride above: those represent an explicit
+// TEXT search location ("Mississauga," a postal code, a centre name) and
+// drive actual result filtering; UserLocation represents the device's real
+// coordinate and is used ONLY to compute a display-only distance for
+// already-filtered results (Part 12's "explicit query > implicit device
+// location" principle holds by construction — this state is never read by
+// sessionMatchesLocation or any filtering logic, only by distance display).
+export type UserLocationStatus =
+  | "idle" // not requested yet — the default, and the only state before any user action
+  | "requesting"
+  | "granted"
+  | "denied"
+  | "unavailable" // position genuinely couldn't be determined (no signal, malformed result)
+  | "timeout"
+  | "unsupported"; // navigator.geolocation doesn't exist in this browser
+
+export type UserLocation = {
+  status: UserLocationStatus;
+  latitude?: number;
+  longitude?: number;
+  accuracy?: number;
+  timestamp?: number;
+};
+
+function isSaneCoordinate(lat: number, lon: number): boolean {
+  return Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+}
+
+// One-time position request (Part 2) — navigator.geolocation.getCurrentPosition,
+// never watchPosition: DropIn only ever needs "roughly how far is this
+// facility right now," not continuous tracking, and a one-shot request is
+// both the simplest and the most private option that satisfies the
+// feature. enableHighAccuracy is deliberately false — GPS-level (metre)
+// precision is unnecessary and slower/more battery-hungry than a
+// network/wifi-based fix for comparing distances at the kilometre scale
+// real facility spacing operates at (Part 2's "minimum accuracy needed").
+// Nothing here fires until requestLocation() is called from an explicit
+// user action — no effect requests location on mount.
+function useUserLocation() {
+  const [userLocation, setUserLocation] = useState<UserLocation>({ status: "idle" });
+
+  const requestLocation = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setUserLocation({ status: "unsupported" });
+      return;
+    }
+    setUserLocation({ status: "requesting" });
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        if (!isSaneCoordinate(latitude, longitude)) {
+          setUserLocation({ status: "unavailable" });
+          return;
+        }
+        setUserLocation({ status: "granted", latitude, longitude, accuracy, timestamp: position.timestamp });
+      },
+      (error) => {
+        if (error.code === error.PERMISSION_DENIED) setUserLocation({ status: "denied" });
+        else if (error.code === error.TIMEOUT) setUserLocation({ status: "timeout" });
+        else setUserLocation({ status: "unavailable" });
+      },
+      {
+        enableHighAccuracy: false,
+        timeout: 10_000,
+        // A cached fix up to 5 minutes old is fine for facility-distance
+        // purposes and avoids forcing a fresh GPS/network fix on every tap
+        // — still a one-time read, not tracking.
+        maximumAge: 5 * 60 * 1000,
+      },
+    );
+  }, []);
+
+  return { userLocation, requestLocation };
+}
+
+// The header pill's visible text — an explicit search location always wins
+// (Part 11/12: "pickleball mississauga" and real Near Me stay conceptually
+// distinct, and an explicit query is never overridden by device location).
+// "Near me" is used only once geolocation has actually succeeded — never a
+// guessed neighbourhood name, since that would need reverse-geocoding
+// infrastructure this phase deliberately doesn't add (Part 11).
+function locationPillLabel(effectiveLocation: DetectedLocation | undefined, userLocation: UserLocation): string {
+  if (effectiveLocation) return effectiveLocation.label;
+  if (userLocation.status === "requesting") return "Locating…";
+  if (userLocation.status === "granted") return "Near me";
+  return "Near you";
+}
+
+// The pill's action is always the same (request/refresh device location)
+// regardless of what text it's currently showing, so the accessible name
+// describes that action, not the transient label — calm, non-technical
+// language throughout, never a raw browser error (Part 3).
+function locationPillAriaLabel(userLocation: UserLocation): string {
+  if (userLocation.status === "requesting") return "Getting your location";
+  if (userLocation.status === "granted") return "Using your location for distance — tap to refresh";
+  if (userLocation.status === "denied") return "Location access denied — tap to try again";
+  if (userLocation.status === "unsupported") return "Location isn't available in this browser";
+  return "Use your location to see distance to activities";
 }
 
 // Shared by every horizontally-scrolling chip/date row that can overflow —
@@ -402,6 +504,10 @@ export default function SearchSurface() {
   // always displays the effective one; neither is ever typed into directly.
   const [persistentLocation, setPersistentLocation] = useState<DetectedLocation | undefined>(undefined);
   const [locationOverride, setLocationOverride] = useState<DetectedLocation | undefined>(undefined);
+  // Real device geolocation (Phase 4.2) — entirely separate from the two
+  // states above; see useUserLocation's own comment for why it never
+  // touches search filtering.
+  const { userLocation, requestLocation } = useUserLocation();
   const [queryMiss, setQueryMiss] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   // Results-only presentation choice (Discovery's highlights always stay
@@ -561,6 +667,24 @@ export default function SearchSurface() {
   const maxAvailableDateKey = useMemo(
     () => sessions.reduce((max, s) => (s.date > max ? s.date : max), todayDateKey),
     [sessions, todayDateKey],
+  );
+
+  // Phase 4.2, Part 7/9/20 — a distance getter, not a precomputed map over
+  // all ~46k sessions: recomputed only when userLocation itself changes
+  // (not on every render/search/filter change), and even then only ever
+  // actually called for whatever's currently being rendered (Discovery's ~5
+  // highlights, one page of Results) via the two SessionCard.map() call
+  // sites below — never the full dataset. Reuses Session.distanceKm, the
+  // field the Result Card already had a conditional rendering hook for
+  // (Part 9) — this function's only job is deciding what value that field
+  // should hold for a given session right now, never touching layout.
+  const distanceKmFor = useCallback(
+    (s: Session): number | undefined => {
+      if (userLocation.status !== "granted" || userLocation.latitude === undefined || userLocation.longitude === undefined) return undefined;
+      if (s.latitude === undefined || s.longitude === undefined) return undefined;
+      return formatDistanceKm(haversineKm(userLocation.latitude, userLocation.longitude, s.latitude, s.longitude));
+    },
+    [userLocation.status, userLocation.latitude, userLocation.longitude],
   );
 
   const discoveryHighlights = useMemo(() => {
@@ -813,7 +937,13 @@ export default function SearchSurface() {
   }, [sessions, matchedActivities, effectiveLocation, selectedDate]);
 
   function commitQuery(q: string) {
-    const trimmed = q.trim();
+    // "near me"/"nearby" carry no parseable location today (Part 13) — the
+    // box itself still shows exactly what the user typed via setQuery(q)
+    // below; only the text actually handed to the parser (and, from there,
+    // committedQuery — re-parsed downstream by the `parsed` memo, so this
+    // must be the same string or the two would silently diverge) drops the
+    // phrase, so "pickleball near me" behaves like "pickleball."
+    const trimmed = stripNearMeLanguage(q.trim());
     setQuery(q);
     setSuggestionsOpen(false);
     setActiveFilter("All");
@@ -944,17 +1074,26 @@ export default function SearchSurface() {
         <header className="flex items-center justify-between py-4">
           <h1 className="text-lg font-semibold tracking-tight text-text-primary">DropIn</h1>
           <div className="flex items-center gap-3">
-            {/* Current Search Area — display only. It reflects wherever the
-                search just resolved to; it is never typed into directly.
-                A brief warm pulse confirms it just changed. */}
-            <span
-              className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 text-sm text-text-secondary transition-colors duration-500 ease-out ${
+            {/* Current Search Area, and (Phase 4.2) the one location
+                affordance — its visible text still just reflects wherever
+                the search resolved to (never typed into directly, a brief
+                warm pulse confirms it just changed), but it's now also the
+                single intentional action that requests real device
+                location. Never fired automatically — only this onClick, in
+                response to a real tap/click/Enter, ever calls
+                requestLocation(). */}
+            <button
+              type="button"
+              onClick={requestLocation}
+              disabled={userLocation.status === "requesting"}
+              aria-label={locationPillAriaLabel(userLocation)}
+              className={`flex items-center gap-1 rounded-full px-2 py-1.5 text-sm text-text-secondary transition-colors duration-500 ease-out hover:bg-hover-surface hover:text-sage-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-text-secondary ${
                 pillPulsing ? "motion-safe:animate-[pillPulse_900ms_ease-out]" : ""
               }`}
             >
               <LocationIcon className="h-4 w-4 text-text-secondary" />
-              {effectiveLocation ? effectiveLocation.label : "Near you"}
-            </span>
+              {locationPillLabel(effectiveLocation, userLocation)}
+            </button>
             <button
               type="button"
               aria-label="About DropIn"
@@ -1111,7 +1250,14 @@ export default function SearchSurface() {
               ) : (
                 <div className="space-y-4">
                   {discoveryHighlights.map((s, i) => (
-                    <SessionCard key={s.id} s={s} now={now} liveNow={liveNow} onSelect={setSelectedSession} delayMs={i * 30} />
+                    <SessionCard
+                      key={s.id}
+                      s={distanceKmFor(s) !== undefined ? { ...s, distanceKm: distanceKmFor(s) } : s}
+                      now={now}
+                      liveNow={liveNow}
+                      onSelect={setSelectedSession}
+                      delayMs={i * 30}
+                    />
                   ))}
                 </div>
               )}
@@ -1483,7 +1629,15 @@ export default function SearchSurface() {
                     {d.label && <h2 className="mb-3 text-base font-semibold text-sage-text">{d.label}</h2>}
                     <div className="space-y-4">
                       {d.sessions.map((s, i) => (
-                        <SessionCard key={s.id} s={s} now={now} liveNow={liveNow} onSelect={setSelectedSession} density={density} delayMs={i * 30} />
+                        <SessionCard
+                          key={s.id}
+                          s={distanceKmFor(s) !== undefined ? { ...s, distanceKm: distanceKmFor(s) } : s}
+                          now={now}
+                          liveNow={liveNow}
+                          onSelect={setSelectedSession}
+                          density={density}
+                          delayMs={i * 30}
+                        />
                       ))}
                     </div>
                   </div>
@@ -1593,31 +1747,28 @@ export default function SearchSurface() {
                   href={selectedSession.officialUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-border px-4 py-3 text-sm font-semibold text-text-primary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
+                  className="flex h-11 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-border px-3 text-sm font-semibold text-text-primary transition-colors duration-150 ease-out hover:bg-hover-surface hover:text-sage-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
                 >
-                  <LinkIcon className="h-5 w-5" />
-                  <span className="text-center">{officialActionLabel(selectedSession)}</span>
-                  <span aria-hidden="true" />
+                  <LinkIcon className="h-5 w-5 flex-shrink-0" />
+                  <span>{officialActionLabel(selectedSession)}</span>
                 </a>
               )}
               {selectedSession.phone && (
                 <a
                   href={`tel:${selectedSession.phone}`}
-                  className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-border px-4 py-3 text-sm font-semibold text-text-primary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
+                  className="flex h-11 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-border px-3 text-sm font-semibold text-text-primary transition-colors duration-150 ease-out hover:bg-hover-surface hover:text-sage-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
                 >
-                  <PhoneIcon className="h-5 w-5" />
-                  <span className="text-center">Call</span>
-                  <span aria-hidden="true" />
+                  <PhoneIcon className="h-5 w-5 flex-shrink-0" />
+                  <span>Call</span>
                 </a>
               )}
               <button
                 type="button"
                 onClick={() => handleShare(selectedSession)}
-                className="grid grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl border border-border px-4 py-3 text-sm font-semibold text-text-primary transition-all duration-[170ms] ease-out hover:-translate-y-px hover:bg-hover-surface hover:text-sage-text hover:shadow-[0_8px_20px_-6px_rgba(47,43,39,0.14)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
+                className="flex h-11 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-border px-3 text-sm font-semibold text-text-primary transition-colors duration-150 ease-out hover:bg-hover-surface hover:text-sage-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
               >
-                <ShareIcon className="h-5 w-5" />
-                <span className="text-center">{shareCopied ? "Copied" : "Share"}</span>
-                <span aria-hidden="true" />
+                <ShareIcon className="h-5 w-5 flex-shrink-0" />
+                <span>{shareCopied ? "Copied" : "Share"}</span>
               </button>
             </div>
 
