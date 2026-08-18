@@ -45,3 +45,19 @@ export function canonicalLatestPath(slug: string): string {
 export function canonicalPreviousPath(slug: string): string {
   return path.join(canonicalDir(slug), "previous.json");
 }
+
+// Phase 4.1 — one facility-location registry shared across all
+// municipalities (cross-cutting reference data, not per-source raw/
+// canonical session data), built by its own separate, deliberate process
+// (scripts/refresh/facility-locations.ts) rather than the routine
+// per-municipality data refresh. Same two-slot latest/previous retention
+// and the same SnapshotStorage abstraction as every other snapshot.
+const FACILITY_LOCATIONS_DIR = path.join(DATA_ROOT, "facility-locations");
+
+export function facilityLocationsLatestPath(): string {
+  return path.join(FACILITY_LOCATIONS_DIR, "latest.json");
+}
+
+export function facilityLocationsPreviousPath(): string {
+  return path.join(FACILITY_LOCATIONS_DIR, "previous.json");
+}

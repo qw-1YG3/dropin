@@ -32,6 +32,7 @@
 // DropIn has not independently confirmed attendance mechanics beyond what
 // registrationStatus itself already states.
 import { getShortcutForActivity } from "../../activities";
+import { validGtaCoordinate } from "../../coordinates";
 import { weekdayLabel, legacyDay } from "../../time";
 import type { RegistrationStatus, Session } from "../../types";
 import type { PmClass } from "./client";
@@ -90,19 +91,6 @@ function formatAbsoluteTimeFromMinutes(startHour: number, startMinute: number, e
   const endFmt = fmt(endHour, endMinute);
   if (start.period === endFmt.period) return `${start.display}–${endFmt.display} ${endFmt.period}`;
   return `${start.display} ${start.period}–${endFmt.display} ${endFmt.period}`;
-}
-
-// GTA-area plausibility bounds (Part 12) — wide enough to cover every
-// municipality DropIn could plausibly add (Toronto through outer 905 belt)
-// without being so wide it would accept an obviously wrong coordinate
-// (e.g. a swapped lat/long landing in the ocean or another continent).
-const GTA_LAT_RANGE: [number, number] = [43.0, 44.5];
-const GTA_LON_RANGE: [number, number] = [-80.5, -78.5];
-
-function validCoordinate(lat: number | undefined, lon: number | undefined): { latitude?: number; longitude?: number } {
-  if (typeof lat !== "number" || typeof lon !== "number" || !Number.isFinite(lat) || !Number.isFinite(lon)) return {};
-  if (lat < GTA_LAT_RANGE[0] || lat > GTA_LAT_RANGE[1] || lon < GTA_LON_RANGE[0] || lon > GTA_LON_RANGE[1]) return {};
-  return { latitude: lat, longitude: lon };
 }
 
 // Confirmed cold (no session/login) via curl for both Vaughan and Markham
@@ -182,7 +170,7 @@ export function normalizePmClass(
   const age = record.NoAgeRestriction
     ? { ageMin: undefined, ageMax: undefined }
     : { ageMin: typeof record.MinAge === "number" ? record.MinAge : undefined, ageMax: typeof record.MaxAge === "number" ? record.MaxAge : undefined };
-  const coords = validCoordinate(record.Address?.Latitude, record.Address?.Longitude);
+  const coords = validGtaCoordinate(record.Address?.Latitude, record.Address?.Longitude);
 
   const session: Session = {
     id,

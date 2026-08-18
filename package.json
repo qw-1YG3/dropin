@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "refresh:data": "tsx scripts/refresh/index.ts",
+    "refresh:facilities": "tsx scripts/refresh/facility-locations.ts",
     "snapshot:health": "tsx scripts/snapshot-health.ts"
   },
   "dependencies": {

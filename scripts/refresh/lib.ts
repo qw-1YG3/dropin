@@ -8,6 +8,7 @@ import { writeSnapshotAtomic, readJsonIfExists } from "../../lib/dropin/snapshot
 import { rawLatestPath, rawPreviousPath, canonicalLatestPath, canonicalPreviousPath } from "../../lib/dropin/snapshot/paths";
 import { validateCanonicalSessions, checkCountCollapse } from "../../lib/dropin/snapshot/validate";
 import { CANONICAL_SCHEMA_VERSION, type CanonicalSnapshot, type RawSnapshot, type SourceFreshness } from "../../lib/dropin/snapshot/types";
+import { enrichSessionsWithFacilityLocations, loadFacilityLocationLookup } from "../../lib/dropin/facility-locations";
 import type { Session } from "../../lib/dropin/types";
 
 export type SourceReport = {
@@ -82,7 +83,20 @@ export async function refreshOneSource(params: {
 
   const warnings = [...(normalized.warnings ?? [])];
 
-  const validation = validateCanonicalSessions(normalized.sessions, municipalityName);
+  // Facility-location enrichment (Phase 4.1, Part 6/10) — source-agnostic,
+  // applied uniformly to every source's sessions here in one place rather
+  // than repeated per-source-family. A pure, local, in-memory join against
+  // an already-built snapshot (no network call, see
+  // lib/dropin/facility-locations.ts) — never overwrites a session that
+  // already carries its own real coordinate (PerfectMind's direct
+  // Address.Latitude/Longitude), only fills a gap when the registry has a
+  // validated entry for that session's facility. A facility with no
+  // resolved entry leaves the session's coordinate exactly as it was
+  // (undefined stays undefined) — this step can only add real, validated
+  // coordinates, never invent or downgrade one.
+  const enrichedSessions = enrichSessionsWithFacilityLocations(normalized.sessions, loadFacilityLocationLookup());
+
+  const validation = validateCanonicalSessions(enrichedSessions, municipalityName);
   if (!validation.ok) {
     writeSnapshotAtomic(rawLatestPath(slug), rawPreviousPath(slug), rawSnapshot);
     return {
@@ -90,7 +104,7 @@ export async function refreshOneSource(params: {
       municipality: municipalityName,
       fetchStatus: "failure",
       rawRecordCount: recordCount,
-      canonicalSessionCount: normalized.sessions.length,
+      canonicalSessionCount: enrichedSessions.length,
       durationMs: Date.now() - start,
       activated: false,
       warnings,
@@ -100,7 +114,7 @@ export async function refreshOneSource(params: {
   warnings.push(...validation.warnings);
 
   const previousCanonical = readJsonIfExists<CanonicalSnapshot>(canonicalLatestPath(slug));
-  const collapseCheck = checkCountCollapse(normalized.sessions.length, previousCanonical?.metadata.canonicalSessionCount);
+  const collapseCheck = checkCountCollapse(enrichedSessions.length, previousCanonical?.metadata.canonicalSessionCount);
   if (!collapseCheck.ok) {
     writeSnapshotAtomic(rawLatestPath(slug), rawPreviousPath(slug), rawSnapshot);
     return {
@@ -108,7 +122,7 @@ export async function refreshOneSource(params: {
       municipality: municipalityName,
       fetchStatus: "failure",
       rawRecordCount: recordCount,
-      canonicalSessionCount: normalized.sessions.length,
+      canonicalSessionCount: enrichedSessions.length,
       durationMs: Date.now() - start,
       activated: false,
       warnings,
@@ -126,14 +140,14 @@ export async function refreshOneSource(params: {
       fetchedAt,
       normalizedAt: new Date().toISOString(),
       sourceRecordCount: recordCount,
-      canonicalSessionCount: normalized.sessions.length,
+      canonicalSessionCount: enrichedSessions.length,
       status: "success",
       warnings: warnings.length > 0 ? warnings : undefined,
       sourceFreshness,
       ageJoin: normalized.ageJoin,
       schemaVersion: CANONICAL_SCHEMA_VERSION,
     },
-    sessions: normalized.sessions,
+    sessions: enrichedSessions,
   };
   writeSnapshotAtomic(canonicalLatestPath(slug), canonicalPreviousPath(slug), canonicalSnapshot);
 
@@ -146,7 +160,7 @@ export async function refreshOneSource(params: {
     municipality: municipalityName,
     fetchStatus: "success",
     rawRecordCount: recordCount,
-    canonicalSessionCount: normalized.sessions.length,
+    canonicalSessionCount: enrichedSessions.length,
     durationMs: Date.now() - start,
     activated: true,
     ageJoinRate,
