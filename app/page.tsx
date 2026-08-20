@@ -759,10 +759,10 @@ export default function SearchSurface() {
   const nearestActive = nearestMode && userLocation.status === "granted";
 
   function nearestControlAriaLabel(): string {
-    if (awaitingNearestLocation && userLocation.status === "requesting") return "Getting your location to sort by nearest";
-    if (nearestActive) return "Nearest — sorted by distance within each time group, tap to turn off";
-    if (userLocation.status === "denied") return "Sort by nearest — location access denied, tap to try again";
-    return "Sort by nearest to you within each time group";
+    if (awaitingNearestLocation && userLocation.status === "requesting") return "Getting your location to sort nearest first";
+    if (nearestActive) return "Nearest first — sorted by distance within each time group, tap to turn off";
+    if (userLocation.status === "denied") return "Sort nearest first — location access denied, tap to try again";
+    return "Sort nearest first, within each time group";
   }
 
   const discoveryHighlights = useMemo(() => {
@@ -1171,7 +1171,7 @@ export default function SearchSurface() {
       {/* Persistent header — present across every state */}
       <div className="mx-auto max-w-2xl px-4 sm:px-6">
         <header className="flex items-center justify-between py-4">
-          <h1 className="text-lg font-semibold tracking-tight text-text-primary">DropIn</h1>
+          <h1 className="text-lg font-semibold tracking-tight text-logo">DropIn</h1>
           <div className="flex items-center gap-3">
             {/* Current Search Area, and (Phase 4.2) the one location
                 affordance — its visible text still just reflects wherever
@@ -1602,13 +1602,24 @@ export default function SearchSurface() {
               {/* Now the one place the active activity is actually named —
                   absorbing the job the removed standalone heading used to
                   do, rather than duplicating it above the filters. Nearest
-                  (Phase 4.4B) sits right next to it, not with the density
-                  toggle on the right: it's a ranking preference, the same
-                  family as the count text describing what's being shown,
-                  not a presentation control like density. Text-based and
-                  plain by default — only the existing subtle sage
-                  "selected" treatment (already used by the active Activity
-                  chip) marks it on, no new visual language. */}
+                  first (Phase 4.4B, relabelled/restyled in a later polish
+                  pass) sits right next to it, not with the density toggle on
+                  the right: it's a ranking preference, the same family as
+                  the count text describing what's being shown, not a
+                  presentation control like density.
+                  A quiet outlined pill, not a chip: `border` is present on
+                  BOTH states (only its color changes — transparent when
+                  active) specifically so the box model never changes size
+                  between inactive/active and toggling never shifts
+                  neighbouring layout. Deliberately lighter-weight than the
+                  real Activity chips (no shadow, no hover-lift, tighter
+                  padding, font-medium not semibold) so it reads as related
+                  but subordinate — a ranking preference, not another
+                  filter. Inactive text uses sage-text at reduced opacity
+                  ("muted green") purely so active (full-opacity sage-text,
+                  "deeper green") has somewhere higher to read as deeper
+                  against — both are the one existing interactive/brand
+                  green, no new color introduced. */}
               <div className="flex min-w-0 items-center gap-3">
                 <span className="truncate">{`${resultsFiltered.length} ${activityDisplayLabel ? `${activityDisplayLabel} ` : ""}${resultsFiltered.length === 1 ? "activity" : "activities"}${lastUpdatedLabel ? ` · ${lastUpdatedLabel}` : ""}`}</span>
                 <button
@@ -1617,11 +1628,13 @@ export default function SearchSurface() {
                   aria-label={nearestControlAriaLabel()}
                   disabled={awaitingNearestLocation && userLocation.status === "requesting"}
                   onClick={handleNearestClick}
-                  className={`flex-shrink-0 rounded-md px-1.5 py-1.5 font-medium transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text disabled:cursor-default ${
-                    nearestActive ? "bg-sage/15 text-sage-text" : "text-text-secondary hover:bg-hover-surface hover:text-sage-text"
+                  className={`flex-shrink-0 whitespace-nowrap rounded-full border px-2.5 py-1.5 font-medium transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text disabled:cursor-default ${
+                    nearestActive
+                      ? "border-transparent bg-sage/15 text-sage-text"
+                      : "border-border bg-white text-sage-text/70 hover:border-sage-text/40 hover:bg-hover-surface hover:text-sage-text"
                   }`}
                 >
-                  Nearest
+                  Nearest first
                 </button>
               </div>
               <div className="flex flex-shrink-0 items-center gap-1" role="group" aria-label="List density">

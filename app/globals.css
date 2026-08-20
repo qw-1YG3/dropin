@@ -29,6 +29,13 @@
   --sage: #7e9c77; /* fills/backgrounds — pair with text-primary, not white */
   --sage-text: #5f755a; /* status text, focus state, active search, links —
     the one interactive/brand colour across the product */
+  --logo: #4a5b46; /* wordmark only — a deeper forest/moss green in the same
+    family as sage-text (same hue ratio, ~22% darker), reserved for brand
+    presence rather than an interactive/status meaning. 6.8:1 against
+    --surface, 7.3:1 against white — both comfortably past AA for normal
+    text. Not reused for active states, headings, or selected controls;
+    those stay on sage-text so the logo remains the single deepest green
+    on the page rather than blending into interactive chrome. */
   --terracotta: #a06241; /* the primary CTA only — Directions, primary submit.
     Never search borders, hover borders, chips, or background panels. */
   --terracotta-soft: #c97b52; /* reserved — not currently referenced in
@@ -58,6 +65,7 @@
   --color-hover-surface: var(--hover-surface);
   --color-sage: var(--sage);
   --color-sage-text: var(--sage-text);
+  --color-logo: var(--logo);
   --color-terracotta: var(--terracotta);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
