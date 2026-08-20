@@ -204,3 +204,44 @@ export function compareChronologically(a: { date: string; startMinutes: number }
   if (a.date !== b.date) return a.date < b.date ? -1 : 1;
   return a.startMinutes - b.startMinutes;
 }
+
+// Phase 4.3B — the ranking chain Phase 4.3A's real-data audit recommended
+// (docs/PHASE_4_3A_RANKING_STRATEGY_AUDIT.md, "Strategy C" plus a
+// deterministic final key): chronological order remains authoritative
+// (never lets a later session outrank an earlier one — the audit's Strategy
+// B was rejected specifically for doing that), and distance ONLY breaks an
+// exact date+startMinutes tie. `distanceKmFor` is a caller-supplied lookup
+// rather than a stored field so this stays a pure comparator factory with no
+// dependency on React state, geolocation, or when it's called — the same
+// discipline as compareChronologically above. When `distanceKmFor` returns
+// `undefined` for every session (no granted location), every tie's distance
+// step is a no-op and this degrades to `compareChronologically` + a
+// deterministic `id` tiebreak, which is exactly Part 5's required
+// no-location behavior — achieved by construction, not a separate branch.
+//
+// Missing distance never sorts as if it were 0 km (that was Phase 4.3A's
+// concrete cautionary finding against naive weighted scoring) — a session
+// with a real distance value always sorts ahead of one without, among
+// otherwise-tied sessions, and two sessions that both lack distance (or
+// have the identical distance) fall through to the `id` tiebreak. Every
+// branch is a strict lexicographic tuple comparison
+// (date, startMinutes, hasDistance, distance, id), which is transitive and
+// deterministic by construction — never an ad hoc pairwise heuristic that
+// could produce unstable ordering across a larger set (Part 8).
+export function compareForRanking<T extends { date: string; startMinutes: number; id: string }>(
+  distanceKmFor: (session: T) => number | undefined,
+): (a: T, b: T) => number {
+  return (a, b) => {
+    const chronological = compareChronologically(a, b);
+    if (chronological !== 0) return chronological;
+
+    const da = distanceKmFor(a);
+    const db = distanceKmFor(b);
+    const aHasDistance = da !== undefined;
+    const bHasDistance = db !== undefined;
+    if (aHasDistance !== bHasDistance) return aHasDistance ? -1 : 1;
+    if (aHasDistance && bHasDistance && da !== db) return da - db;
+
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  };
+}

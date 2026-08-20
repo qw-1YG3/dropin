@@ -24,7 +24,7 @@ import { parseQuery, sessionMatchesLocation, stripNearMeLanguage, type DetectedL
 import {
   addDays,
   clockLabel,
-  compareChronologically,
+  compareForRanking,
   dateLabel,
   dateStripContextLabel,
   dateStripDateLabel,
@@ -852,8 +852,19 @@ export default function SearchSurface() {
   // bucket, regrouping by that same dimension would just repeat the active
   // chip as a redundant heading, so that case collapses to one flat,
   // chronologically-sorted list instead.
+  //
+  // Phase 4.3B — sessions are sorted with compareForRanking, not the older
+  // date/startMinutes-only compareChronologically: chronological order is
+  // still fully authoritative (a later session can never outrank an earlier
+  // one), but an exact date+startMinutes tie now breaks on real distance
+  // when userLocation is granted, per Phase 4.3A's real-data audit. With no
+  // granted location, distanceKmFor returns undefined for every session, so
+  // every tie's distance step is a no-op and this is byte-for-byte the old
+  // chronological-then-arbitrary order, except ties now end on a
+  // deterministic `id` key instead of incidental snapshot/municipality
+  // array order (see compareForRanking's own comment in lib/dropin/time.ts).
   const resultsGrouped = useMemo(() => {
-    const sorted = [...resultsFiltered].sort(compareChronologically);
+    const sorted = [...resultsFiltered].sort(compareForRanking(distanceKmFor));
     const isTodaySelected = isToday(selectedDate, now);
 
     if (isTodaySelected) {
@@ -885,7 +896,7 @@ export default function SearchSurface() {
       sessions: sorted.filter((s) => timeOfDayBucket(s.startMinutes) === t),
     }));
     return groups.filter((g) => g.sessions.length > 0);
-  }, [resultsFiltered, selectedDate, timeOfDayFilter, now, liveNow]);
+  }, [resultsFiltered, selectedDate, timeOfDayFilter, now, liveNow, distanceKmFor]);
 
   const isUnavailableMunicipality = effectiveLocation?.type === "municipality" && effectiveLocation.status === "not-yet-available";
 
