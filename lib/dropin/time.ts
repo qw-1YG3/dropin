@@ -245,3 +245,44 @@ export function compareForRanking<T extends { date: string; startMinutes: number
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   };
 }
+
+// Phase 4.4B — the explicit, opt-in "Nearest" mode Phase 4.4's audit
+// recommended (docs/PHASE_4_4_PROXIMITY_INTENT_LOCATION_UX_AUDIT.md §7/§16):
+// distance ordered ahead of start time, but — critically — this comparator
+// is applied to the SAME already-date-scoped pool `compareForRanking` sorts,
+// BEFORE that pool is partitioned into temporal groups (Happening now /
+// Starting soon / Starting today / Later today, or Morning / Afternoon /
+// Evening). Group membership itself is decided entirely by each session's
+// own real status/time bucket, never by array order, so sorting the pool
+// with this comparator first and then applying the exact same group filters
+// automatically keeps every session in its real temporal group — this
+// function has no way to move a session across groups, because it never
+// sees or produces group boundaries at all. This is what "group-bounded"
+// means in practice: no new grouping concept, no time-window magic number,
+// just a different pre-sort ahead of the same existing partition step.
+//
+// `date` is still checked first (matching compareForRanking) purely for
+// safety on a pool that could in principle span more than one date — within
+// the single-date pools this is actually ever called on, it's a no-op tie.
+// Missing distance follows the identical safe policy as compareForRanking
+// (never treated as 0, never hidden, sorts after real distance, falls back
+// to start time then `id`) — same transitive lexicographic-tuple shape
+// (date, hasDistance, distance, startMinutes, id), just distance promoted
+// ahead of startMinutes in the tuple order.
+export function compareNearest<T extends { date: string; startMinutes: number; id: string }>(
+  distanceKmFor: (session: T) => number | undefined,
+): (a: T, b: T) => number {
+  return (a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+
+    const da = distanceKmFor(a);
+    const db = distanceKmFor(b);
+    const aHasDistance = da !== undefined;
+    const bHasDistance = db !== undefined;
+    if (aHasDistance !== bHasDistance) return aHasDistance ? -1 : 1;
+    if (aHasDistance && bHasDistance && da !== db) return da - db;
+
+    if (a.startMinutes !== b.startMinutes) return a.startMinutes - b.startMinutes;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  };
+}

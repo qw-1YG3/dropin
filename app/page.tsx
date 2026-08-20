@@ -25,6 +25,7 @@ import {
   addDays,
   clockLabel,
   compareForRanking,
+  compareNearest,
   dateLabel,
   dateStripContextLabel,
   dateStripDateLabel,
@@ -234,9 +235,18 @@ function isSaneCoordinate(lat: number, lon: number): boolean {
 function useUserLocation() {
   const [userLocation, setUserLocation] = useState<UserLocation>({ status: "idle" });
 
-  const requestLocation = useCallback(() => {
+  // Phase 4.4B — an optional `onResolved` lets a caller (Nearest) react to
+  // this SAME one-time request's real outcome without a separate effect
+  // watching `userLocation.status`: it's called directly from the native
+  // async geolocation callbacks below, exactly where `setUserLocation`
+  // already is, never from a useEffect. The header pill's own call site
+  // passes no callback and is completely unaffected — this is still the one
+  // navigator.geolocation.getCurrentPosition call Phase 4.2 established, not
+  // a second geolocation implementation.
+  const requestLocation = useCallback((onResolved?: (status: UserLocationStatus) => void) => {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
       setUserLocation({ status: "unsupported" });
+      onResolved?.("unsupported");
       return;
     }
     setUserLocation({ status: "requesting" });
@@ -245,14 +255,18 @@ function useUserLocation() {
         const { latitude, longitude, accuracy } = position.coords;
         if (!isSaneCoordinate(latitude, longitude)) {
           setUserLocation({ status: "unavailable" });
+          onResolved?.("unavailable");
           return;
         }
         setUserLocation({ status: "granted", latitude, longitude, accuracy, timestamp: position.timestamp });
+        onResolved?.("granted");
       },
       (error) => {
-        if (error.code === error.PERMISSION_DENIED) setUserLocation({ status: "denied" });
-        else if (error.code === error.TIMEOUT) setUserLocation({ status: "timeout" });
-        else setUserLocation({ status: "unavailable" });
+        let status: UserLocationStatus = "unavailable";
+        if (error.code === error.PERMISSION_DENIED) status = "denied";
+        else if (error.code === error.TIMEOUT) status = "timeout";
+        setUserLocation({ status });
+        onResolved?.(status);
       },
       {
         enableHighAccuracy: false,
@@ -524,6 +538,15 @@ export default function SearchSurface() {
   // states above; see useUserLocation's own comment for why it never
   // touches search filtering.
   const { userLocation, requestLocation } = useUserLocation();
+  // Phase 4.4B — the explicit, opt-in "Nearest" ranking mode. Always starts
+  // false on a fresh session (Part 13 — real location already being granted
+  // must never silently switch ranking; only an explicit tap does).
+  // `awaitingNearestLocation` distinguishes a location request the user
+  // fired FROM the Nearest control from one fired from the header pill —
+  // only the former should auto-activate Nearest once granted; the header
+  // pill refreshing location on its own must never silently turn Nearest on.
+  const [nearestMode, setNearestMode] = useState(false);
+  const [awaitingNearestLocation, setAwaitingNearestLocation] = useState(false);
   const [queryMiss, setQueryMiss] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   // Results-only presentation choice (Discovery's highlights always stay
@@ -703,6 +726,45 @@ export default function SearchSurface() {
     [userLocation.status, userLocation.latitude, userLocation.longitude],
   );
 
+  // Phase 4.4B, Part 5 — Nearest reuses requestLocation() exactly as-is (no
+  // second geolocation implementation). If a location was already granted
+  // (e.g. via the header pill), Nearest activates immediately with no new
+  // prompt. Otherwise this fires the one real request and passes a
+  // completion callback: on success it activates Nearest, on
+  // denial/unavailability/timeout/unsupported it silently leaves Nearest
+  // off — never a crash, never a retry loop, never activating on anything
+  // but a real granted position. The callback fires from inside
+  // useUserLocation's own native geolocation callbacks, not from a
+  // useEffect watching state — avoiding an extra render cycle.
+  function handleNearestClick() {
+    if (nearestMode) {
+      setNearestMode(false);
+      return;
+    }
+    if (awaitingNearestLocation) return;
+    if (userLocation.status === "granted") {
+      setNearestMode(true);
+      return;
+    }
+    setAwaitingNearestLocation(true);
+    requestLocation((status) => {
+      setAwaitingNearestLocation(false);
+      if (status === "granted") setNearestMode(true);
+    });
+  }
+
+  // Nearest only ever has a real effect once real coordinates exist —
+  // mirrors distanceKmFor's own gate, so the control can never claim to be
+  // active while doing nothing.
+  const nearestActive = nearestMode && userLocation.status === "granted";
+
+  function nearestControlAriaLabel(): string {
+    if (awaitingNearestLocation && userLocation.status === "requesting") return "Getting your location to sort by nearest";
+    if (nearestActive) return "Nearest — sorted by distance within each time group, tap to turn off";
+    if (userLocation.status === "denied") return "Sort by nearest — location access denied, tap to try again";
+    return "Sort by nearest to you within each time group";
+  }
+
   const discoveryHighlights = useMemo(() => {
     // Exact date match, not the legacy `day` field — Discovery intentionally
     // stays a today-only feed even though `sessions` itself now spans the
@@ -863,8 +925,18 @@ export default function SearchSurface() {
   // chronological-then-arbitrary order, except ties now end on a
   // deterministic `id` key instead of incidental snapshot/municipality
   // array order (see compareForRanking's own comment in lib/dropin/time.ts).
+  //
+  // Phase 4.4B — when Nearest is active, this pre-sort swaps to
+  // compareNearest (distance ahead of start time) instead. Critically, this
+  // is still the SAME pre-sort-then-partition shape: the group filters below
+  // are completely unchanged and decide membership purely from each
+  // session's own real status/time bucket, never from array order — so
+  // swapping the comparator can only ever reorder sessions WITHIN a group,
+  // never move one across a group boundary (Phase 4.4's Part 1 guardrail,
+  // achieved by construction, not a separate check).
   const resultsGrouped = useMemo(() => {
-    const sorted = [...resultsFiltered].sort(compareForRanking(distanceKmFor));
+    const comparator = nearestActive ? compareNearest(distanceKmFor) : compareForRanking(distanceKmFor);
+    const sorted = [...resultsFiltered].sort(comparator);
     const isTodaySelected = isToday(selectedDate, now);
 
     if (isTodaySelected) {
@@ -896,7 +968,7 @@ export default function SearchSurface() {
       sessions: sorted.filter((s) => timeOfDayBucket(s.startMinutes) === t),
     }));
     return groups.filter((g) => g.sessions.length > 0);
-  }, [resultsFiltered, selectedDate, timeOfDayFilter, now, liveNow, distanceKmFor]);
+  }, [resultsFiltered, selectedDate, timeOfDayFilter, now, liveNow, distanceKmFor, nearestActive]);
 
   const isUnavailableMunicipality = effectiveLocation?.type === "municipality" && effectiveLocation.status === "not-yet-available";
 
@@ -1111,7 +1183,7 @@ export default function SearchSurface() {
                 requestLocation(). */}
             <button
               type="button"
-              onClick={requestLocation}
+              onClick={() => requestLocation()}
               disabled={userLocation.status === "requesting"}
               aria-label={locationPillAriaLabel(userLocation)}
               className={`flex items-center gap-1 rounded-full px-2 py-1.5 text-sm text-text-secondary transition-colors duration-500 ease-out hover:bg-hover-surface hover:text-sage-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-text-secondary ${
@@ -1529,8 +1601,29 @@ export default function SearchSurface() {
             <div className="mt-3 flex items-center justify-between border-t border-border/70 py-4 text-xs text-text-secondary">
               {/* Now the one place the active activity is actually named —
                   absorbing the job the removed standalone heading used to
-                  do, rather than duplicating it above the filters. */}
-              <span>{`${resultsFiltered.length} ${activityDisplayLabel ? `${activityDisplayLabel} ` : ""}${resultsFiltered.length === 1 ? "activity" : "activities"}${lastUpdatedLabel ? ` · ${lastUpdatedLabel}` : ""}`}</span>
+                  do, rather than duplicating it above the filters. Nearest
+                  (Phase 4.4B) sits right next to it, not with the density
+                  toggle on the right: it's a ranking preference, the same
+                  family as the count text describing what's being shown,
+                  not a presentation control like density. Text-based and
+                  plain by default — only the existing subtle sage
+                  "selected" treatment (already used by the active Activity
+                  chip) marks it on, no new visual language. */}
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="truncate">{`${resultsFiltered.length} ${activityDisplayLabel ? `${activityDisplayLabel} ` : ""}${resultsFiltered.length === 1 ? "activity" : "activities"}${lastUpdatedLabel ? ` · ${lastUpdatedLabel}` : ""}`}</span>
+                <button
+                  type="button"
+                  aria-pressed={nearestActive}
+                  aria-label={nearestControlAriaLabel()}
+                  disabled={awaitingNearestLocation && userLocation.status === "requesting"}
+                  onClick={handleNearestClick}
+                  className={`flex-shrink-0 rounded-md px-1.5 py-1.5 font-medium transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text disabled:cursor-default ${
+                    nearestActive ? "bg-sage/15 text-sage-text" : "text-text-secondary hover:bg-hover-surface hover:text-sage-text"
+                  }`}
+                >
+                  Nearest
+                </button>
+              </div>
               <div className="flex flex-shrink-0 items-center gap-1" role="group" aria-label="List density">
                 <button
                   type="button"
