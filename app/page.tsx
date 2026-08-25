@@ -17,6 +17,7 @@ import {
   ShareIcon,
 } from "./_components/icons";
 import { ACTIVITY_GROUPS, displayActivityName, getShortcutForActivity, SHORTCUTS } from "@/lib/dropin/activities";
+import { feedbackMailtoUrl, PUBLIC_CONTACT_EMAIL, PUBLIC_FEEDBACK_EMAIL } from "@/lib/dropin/contact";
 import { haversineKm, formatDistanceKm } from "@/lib/dropin/distance";
 import { getDisplayDistrict } from "@/lib/dropin/districts";
 import { MUNICIPALITIES } from "@/lib/dropin/municipalities";
@@ -526,8 +527,14 @@ export default function SearchSurface() {
   const [shareCopied, setShareCopied] = useState(false);
   const shareResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [infoSheetOpen, setInfoSheetOpen] = useState(false);
-  const [feedbackStage, setFeedbackStage] = useState<"idle" | "writing" | "sent">("idle");
-  const [feedbackText, setFeedbackText] = useState("");
+  // Launch Readiness 1B — Privacy is its own Sheet instance rather than a
+  // section inside About: reuses the exact same overlay/motion/accessibility
+  // mechanism (smallest architectural change per that phase's own Part 14
+  // instruction) while keeping About from growing past a comfortable length.
+  // Only one of the two is ever open at a time (see the "Privacy" link's
+  // onClick below), matching how every other sheet in this app already
+  // behaves — never a stacked/simultaneous-sheets pattern.
+  const [privacySheetOpen, setPrivacySheetOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   // Persistent location context (set only by a pure-location search) vs. a
   // one-time override (set by a mixed activity+location search). The pill
@@ -1905,20 +1912,30 @@ export default function SearchSurface() {
               </button>
             </div>
 
-            {/* Trust: verification, freshness, source. Demoted below the
-                actions on purpose — it helps someone trust the listing, not
-                decide whether to attend, so it shouldn't compete with the
-                decision content above. The divider is the same border-t
-                treatment the Results meta bar already uses to mark exactly
-                this kind of "supporting, not primary" boundary. */}
+            {/* Trust: freshness, source. Demoted below the actions on
+                purpose — it helps someone trust the listing, not decide
+                whether to attend, so it shouldn't compete with the decision
+                content above. The divider is the same border-t treatment
+                the Results meta bar already uses to mark exactly this kind
+                of "supporting, not primary" boundary.
+                Launch Readiness 1B — the old "Verified"/"Unverified" prefix
+                was removed here (Session.verificationStatus itself is
+                untouched — still populated by every source adapter exactly
+                as before, preserved for any future internal use). Audit
+                finding: it's permanently "Unverified" for 6 of 7
+                municipalities purely because that source family lacks one
+                structured field (see
+                lib/dropin/sources/activecommunities/normalize.ts's own
+                comment), a narrow technical distinction a user has no way
+                to learn and could easily misread as "this listing might be
+                wrong." It added no decision value beyond what
+                attendanceRequirementLabel() (Walk-in / Pre-registration
+                required, shown separately above) already states clearly
+                per session — removing it is Option C from
+                docs/LAUNCH_READINESS_1A_TRUST_PRIVACY_FEEDBACK_AUDIT.md §8,
+                not a data-architecture change. */}
             <p className="mt-4 border-t border-border/70 pt-3 text-xs text-text-secondary/70">
-              {[
-                selectedSession.verificationStatus === "verified" ? "Verified" : "Unverified",
-                daysAgoLabel(selectedSession.lastUpdated),
-                selectedSession.officialSource,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
+              {[daysAgoLabel(selectedSession.lastUpdated), selectedSession.officialSource].filter(Boolean).join(" · ")}
             </p>
           </>
         )}
@@ -1944,14 +1961,19 @@ export default function SearchSurface() {
       {/* ===================== PRODUCT INFORMATION SHEET =====================
           Bottom sheet on mobile, centered modal from md: up — the Search
           Surface stays visible behind the scrim in both cases, only the
-          dialog's own position/shape changes. */}
+          dialog's own position/shape changes.
+          Launch Readiness 1B — restructured from 5 content sections down to
+          4 (the old "Where does the information come from?" and "Data
+          sources" headings said almost the same thing twice; merged into
+          one) to make room for two new, real trust requirements
+          (Independent project, Privacy link) without making the sheet net
+          longer than before. "Built for easier local recreation" (pure
+          marketing restatement of the intro, no new operational
+          information) was cut rather than kept alongside the new content —
+          see docs/LAUNCH_READINESS_1A_TRUST_PRIVACY_FEEDBACK_AUDIT.md §3/§10. */}
       <Sheet
         open={infoSheetOpen}
-        onClose={() => {
-          setInfoSheetOpen(false);
-          setFeedbackStage("idle");
-          setFeedbackText("");
-        }}
+        onClose={() => setInfoSheetOpen(false)}
         titleId="info-sheet-title"
         desktopVariant="modal"
         // Same fix as the date calendar's title: puts "About DropIn" on the
@@ -1965,90 +1987,142 @@ export default function SearchSurface() {
         }
       >
         <p className="mt-2 text-sm text-text-secondary">
-          DropIn makes it easier to find drop-in activities happening at community centres near you.
-        </p>
-        <p className="mt-2 text-sm text-text-secondary">
-          Search for an activity, choose a day and time, and quickly see what&rsquo;s available —
-          without checking community centre schedules one by one.
+          DropIn makes it easier to discover drop-in recreation activities across participating GTA
+          municipalities, without searching multiple municipal recreation websites one by one. Search for
+          an activity, choose a day and time, and quickly see what&rsquo;s available nearby.
         </p>
 
         <h3 className="mt-4 text-xs font-semibold text-sage-text">Where does the information come from?</h3>
         <p className="mt-1 text-sm text-text-secondary">
-          DropIn brings together publicly available recreation schedules from participating
-          municipalities. We regularly refresh our listings, but schedules can change, so we recommend
-          checking the official source before you head out.
+          DropIn organizes publicly available recreation schedules from official municipal sources —
+          currently {AVAILABLE_MUNICIPALITIES_LABEL}. We&rsquo;re working to bring in more municipalities
+          over time.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Built for easier local recreation</h3>
+        {/* Launch Readiness 1A found "We regularly refresh our listings"
+            overclaimed relative to the deployed reality (no production
+            scheduler exists yet — see docs/PHASE_3_3B_SCHEDULER_DEPLOYMENT_STRATEGY.md's
+            own "NOT CONFIGURED" finding, re-verified in that audit). This
+            wording deliberately makes no cadence claim at all — it points to
+            the real, existing per-listing "Updated ..." freshness label
+            instead of asserting a schedule DropIn can't yet back. Upgrade
+            only after a scheduler is genuinely deployed and verified. */}
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Keeping information current</h3>
         <p className="mt-1 text-sm text-text-secondary">
-          Whether you&rsquo;re looking for badminton tonight, a weekend swim, or simply something
-          active nearby, DropIn is designed to help you find an option with less searching.
+          Each listing shows when it was last updated. Municipal schedules, fees, and availability can
+          change, so we recommend checking the official listing before you head out.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Data sources</h3>
+        {/* Launch Readiness 1A/1B — the one explicit statement this needs;
+            deliberately not repeated on Result Cards or the Decision Sheet
+            (per-session officialSource attribution already provides that
+            local context — see the audit's §8). */}
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Independent project</h3>
         <p className="mt-1 text-sm text-text-secondary">
-          DropIn currently covers {AVAILABLE_MUNICIPALITIES_LABEL}, using each city&rsquo;s official
-          recreation listings. We&rsquo;re working to bring in more municipalities over time.
+          DropIn is an independent project and is not affiliated with or endorsed by the municipalities
+          listed here. Their official recreation sources remain the authoritative source for schedules,
+          fees, eligibility, and availability.
         </p>
 
+        {/* Launch Readiness 1B — replaces the old fake local-state Send flow
+            (see lib/dropin/contact.ts's own comment) with a real mailto:
+            link. DropIn cannot know whether the resulting email is actually
+            sent once the user's mail client takes over, so there is
+            deliberately no "sent"/confirmation state here — showing one
+            would be exactly the false claim this phase exists to remove.
+            The address itself stays visible as plain text right below the
+            link (Part 13's fallback requirement) for anyone without a
+            configured mail client. */}
         <h3 className="mt-4 text-xs font-semibold text-sage-text">Feedback</h3>
-        {feedbackStage === "idle" && (
-          <p className="mt-1 text-sm text-text-secondary">
-            Found something that doesn&rsquo;t look right?{" "}
-            <button
-              type="button"
-              onClick={() => setFeedbackStage("writing")}
-              className="text-sage-text underline underline-offset-2"
-            >
-              Let us know.
-            </button>
-          </p>
-        )}
+        <p className="mt-1 text-sm text-text-secondary">
+          Found something wrong or have an idea for DropIn? Let us know about incorrect information,
+          something that isn&rsquo;t working, or a suggestion.
+        </p>
+        <a
+          href={feedbackMailtoUrl()}
+          className="mt-1.5 inline-block text-sm font-medium text-sage-text underline underline-offset-2"
+        >
+          Email feedback
+        </a>
+        <p className="mt-1 text-xs text-text-secondary/70">{PUBLIC_FEEDBACK_EMAIL}</p>
 
-        {feedbackStage === "writing" && (
-          <div className="mt-1.5">
-            <label htmlFor="feedback-text" className="sr-only">
-              Your note to DropIn
-            </label>
-            <textarea
-              id="feedback-text"
-              autoFocus
-              rows={3}
-              value={feedbackText}
-              onChange={(e) => setFeedbackText(e.target.value)}
-              placeholder="What looks wrong? A time, price, or address that's off..."
-              className="w-full resize-none rounded-lg border border-border p-2.5 text-sm text-text-primary outline-none transition-all duration-150 ease-out placeholder:text-text-secondary/70 focus:border-sage-text focus:ring-2 focus:ring-sage-text/20"
-            />
-            <div className="mt-2 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setFeedbackStage("idle");
-                  setFeedbackText("");
-                }}
-                className="rounded-lg px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-150 ease-out hover:bg-hover-surface hover:text-text-primary active:scale-95"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={feedbackText.trim().length === 0}
-                onClick={() => setFeedbackStage("sent")}
-                className="rounded-lg bg-terracotta px-3 py-1.5 text-xs font-semibold text-white transition-all duration-150 ease-out hover:bg-terracotta/90 disabled:cursor-not-allowed disabled:opacity-40 active:scale-95"
-              >
-                Send
-              </button>
-            </div>
-          </div>
-        )}
-
-        {feedbackStage === "sent" && (
-          <p className="mt-1 rounded-lg border border-sage-text/25 bg-sage/15 px-3 py-2 text-sm text-sage-text motion-safe:animate-[cardIn_220ms_ease-out_both]">
-            Thanks — we&rsquo;ve received your note and will take a look.
-          </p>
-        )}
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Privacy</h3>
+        <p className="mt-1 text-sm text-text-secondary">
+          DropIn asks for very little.{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setInfoSheetOpen(false);
+              setPrivacySheetOpen(true);
+            }}
+            className="text-sage-text underline underline-offset-2"
+          >
+            See what DropIn does and doesn&rsquo;t collect.
+          </button>
+        </p>
 
         <p className="mt-5 text-xs text-text-secondary/70">DropIn · v1.0</p>
+      </Sheet>
+
+      {/* ===================== PRIVACY SHEET =====================
+          Launch Readiness 1B, Part 14 — its own Sheet instance rather than
+          a section inside About: same reasoning as the comment above the
+          Product Information Sheet. Content is limited to what fresh code
+          inspection actually verified (docs/LAUNCH_READINESS_1A_TRUST_PRIVACY_FEEDBACK_AUDIT.md
+          §6) — nothing here describes hosting infrastructure that doesn't
+          exist yet, per that audit's Part 16/§12. */}
+      <Sheet
+        open={privacySheetOpen}
+        onClose={() => setPrivacySheetOpen(false)}
+        titleId="privacy-sheet-title"
+        desktopVariant="modal"
+        titleSlot={
+          <h2 id="privacy-sheet-title" className="text-[18px] font-bold text-text-primary">
+            Privacy
+          </h2>
+        }
+      >
+        <p className="mt-2 text-sm text-text-secondary">No account is required to use DropIn.</p>
+
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Location</h3>
+        <p className="mt-1 text-sm text-text-secondary">
+          If you choose to use location-based features, your browser may ask for permission to access
+          your location. This is used to calculate distance to recreation facilities and to support
+          Nearest First sorting. Search works fully without it.
+        </p>
+
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Precise location storage</h3>
+        <p className="mt-1 text-sm text-text-secondary">
+          Your precise coordinates stay on your device. DropIn does not store them, does not place them in
+          URLs, and does not include them in Share content.
+        </p>
+
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Analytics &amp; cookies</h3>
+        <p className="mt-1 text-sm text-text-secondary">
+          DropIn does not currently use analytics, advertising tracking, or cookies for tracking, and has
+          no accounts to track.
+        </p>
+
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Feedback email</h3>
+        <p className="mt-1 text-sm text-text-secondary">
+          If you email us, the information you choose to share is handled through email — DropIn does not
+          store feedback in a database.
+        </p>
+
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Other websites</h3>
+        <p className="mt-1 text-sm text-text-secondary">
+          DropIn links to official municipal websites and to Google Maps for directions. Those services
+          have their own privacy practices.
+        </p>
+
+        <h3 className="mt-4 text-xs font-semibold text-sage-text">Contact</h3>
+        <p className="mt-1 text-sm text-text-secondary">
+          Questions about privacy can be sent to {PUBLIC_CONTACT_EMAIL}.
+        </p>
+
+        <p className="mt-4 text-xs text-text-secondary/70">
+          This notice may be updated as DropIn&rsquo;s services evolve.
+        </p>
       </Sheet>
     </main>
   );
