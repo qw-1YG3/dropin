@@ -192,6 +192,19 @@ Domain/DNS:
   only application hosting moves to Vercel. Connected only in Phase 5B,
   and only after the rest of this architecture is verified working on
   Vercel's own default subdomain first.
+
+Preview/staging:
+  Vercel's native per-branch/PR preview deployments (automatic, unique
+  HTTPS URLs, zero extra infrastructure) — evaluated as a first-class
+  requirement, not an afterthought, specifically because DropIn's
+  application has no write path at all (confirmed in the security audit),
+  making "preview reads the same production R2 data as production" safe
+  by construction for the common case. A new municipality/source gets a
+  distinct, opt-in R2 `staging/` prefix plus one branch-scoped Preview
+  environment variable (a native Vercel feature, confirmed live) when it
+  specifically needs isolated review before production activation. Full
+  design, including the local → preview/staging → production activation
+  sequence for new data sources: §14.
 ```
 
 ---
@@ -308,6 +321,48 @@ Evaluated against the Phase 5A architecture recommended above (§8) — not impl
 **Should Git be used as long-term data storage? No** — reaffirming §4/§9 directly: Git remains correct for what it already handles (source code, and the two small, infrequently-changing datasets — facility-locations and the Toronto static fallback), and wrong for the large, daily-changing canonical/raw data, for the same measured repo-bloat reason already established. This applies with equal force to a hypothetical "long-term historical archive" — if that were ever wanted (it isn't, per category 4 above), it would belong in R2 (as dated, separately-keyed objects) or nowhere, never in git.
 
 **Q. Repository/data-growth risk, restated plainly:** near-zero, under the recommended architecture. Git only ever holds source code plus two small, slow-changing datasets (currently ~4.5MB combined for `toronto-open-data` + `facility-locations`). The large, fast-changing data lives entirely in R2 under a fixed 2-slot-per-layer policy that doesn't grow with time, only with municipality count (§11's headroom analysis already covers that). The one way this risk becomes real is the already-rejected git-commit-publication alternative — not the recommended path.
+
+---
+
+## 14. Preview / Staging Deployment Strategy
+
+Evaluated against Vercel specifically (§3's recommendation), since preview-deployment capability is a first-class requirement for this decision, not an afterthought bolted on after the fact.
+
+### What Vercel provides natively — verified live, not assumed
+
+Fetched Vercel's current environment-variables documentation this phase (dated 2026-06-16) to confirm the specifics this design depends on, rather than relying on general familiarity with the platform:
+
+- **Automatic preview deployments from Git branches/PRs**: confirmed — "Preview Deployments are created when you push to a branch that is not the Production Branch." With the GitHub integration already assumed in §3/§10, this requires zero extra configuration — every branch and PR gets one automatically.
+- **Unique HTTPS preview URLs**: every deployment (preview or production) gets its own real, valid-HTTPS `*.vercel.app` URL — genuinely reachable from any device, including a physical phone on cellular data, not just localhost-adjacent tooling.
+- **Rollback**: unchanged from §3 — any previous deployment (production or preview) can be promoted to production directly, a mature, one-click Vercel feature.
+- **Production vs. preview environment separation**: native — Vercel's own `Environment` concept (Production / Preview / Development) is a first-class part of the platform, not something this architecture needs to build.
+- **Environment variables scoped by environment — including per-branch overrides**: confirmed live — a variable can be scoped to Production, to all Preview deployments, **or to one specific branch**, and "any branch-specific variables will override other preview environment variables with the same name." This one fact is what makes the new-municipality-testing design below possible without any new infrastructure.
+
+### Why this is simpler for DropIn than a "generic" staging setup
+
+Most apps need a genuinely separate staging *dataset* because their application can **write** to shared state (a database, user records, bookings), and a preview build hitting production write-paths would be actively dangerous. **DropIn's application has no write path at all** — confirmed repeatedly across this session (the security audit found exactly one API route, `/api/sessions`, taking zero input and performing zero mutation; every data *write* happens exclusively in the refresh job, a completely separate process from the running Next.js app, triggered by GitHub Actions, never by a user request or a Vercel deployment). This means **a preview deployment reading the exact same production R2 data as production is safe by construction, not by careful scoping** — there is no mutation path to guard against in the first place. This single architectural fact is what keeps the preview strategy below simple rather than requiring a parallel staging dataset for every ordinary change.
+
+### Recommended workflow
+
+**For the common case — UI, feature, and product-experiment changes (the large majority of work):**
+
+1. Develop and review locally (`npm run dev`) — unchanged, today's existing workflow.
+2. Push to a branch / open a PR. Vercel automatically builds a preview deployment with its own unique HTTPS URL — no manual step.
+3. The preview deployment reads canonical data from **the same production R2 objects** production reads (the R2 read credentials are scoped to apply to both Production and Preview environments — one checkbox in Vercel's environment-variable UI). This is safe (see above) and gives reviewers realistic, real data to evaluate the actual change against — more useful than synthetic/stale staging data would be.
+4. Review on desktop and on a real physical phone, using the real preview URL — both trivially possible since it's a genuine public HTTPS endpoint, not localhost.
+5. Merge to `main` → Vercel automatically promotes to production. Production remains completely untouched by every preceding step until this deliberate merge.
+
+**For the specific case this phase called out — testing a new municipality/source before it's approved for production:**
+
+1. **Local verification** (unchanged from today): run `npm run refresh:data -- --municipality=<new>` locally, inspect the resulting canonical JSON, run `npm run snapshot:health`, verify with `npm run dev` against the local filesystem — exactly today's existing, already-proven workflow, no new tooling.
+2. **Preview/staging verification** (new, and the actual point of this section): once the new municipality's data looks right locally, upload that same locally-verified canonical snapshot to a **separate R2 key prefix** — e.g. `staging/canonical/<slug>/latest.json`, alongside the existing `raw/`/`canonical/` prefixes already designed in §4 — using the exact same `SnapshotStorage`/`writeSnapshotAtomic` mechanism already being built for R2, just pointed at a different key. No new write mechanism, only a different destination for one that already exists. Then add **one branch-specific Preview environment variable** on that feature branch (confirmed supported live, above) telling the app's read path to check the `staging/` prefix for that municipality, falling back to `production/` for everything else. Open that branch's PR; its unique preview URL now shows the new municipality's real data blended into an otherwise-normal DropIn experience — reviewable on desktop and phone — while every *other* preview deployment, and production itself, is completely unaffected (they never read the `staging/` prefix at all).
+3. **Production activation**: once approved, "promotion" is simply re-running the refresh (or a small copy step) targeting the `production/` prefix instead of `staging/` — the same mechanism, same validation/atomicity gates (§5) that already exist. From that point on, the new municipality is just one more entry in `PERFECTMIND_MUNICIPALITIES`/`ACTIVE_COMMUNITIES_MUNICIPALITIES` and the routine daily GitHub Actions refresh (§2) takes over automatically — no special-casing survives past this one-time activation step. The branch-specific preview env var from step 2 is deleted once the branch merges; nothing about it persists into production configuration.
+
+**A preview deployment never automatically overwrites the live production canonical dataset, under either path** — the common-case path never writes anything (the app has no write capability regardless of environment), and the new-municipality path writes only to a distinctly-named `staging/` prefix that production never reads, made visible to a specific preview deployment only via an explicit, deliberate, branch-scoped environment variable that has to be added on purpose.
+
+### What this deliberately does not build
+
+No separate staging *application deployment* running continuously (Vercel's automatic per-branch preview deployments already provide this, ephemerally, exactly when needed — a standing "staging environment" would just be an idle deployment costing nothing extra but adding a URL to keep track of, for zero real benefit over per-branch previews). No staging database. No environment-promotion pipeline tooling beyond what's described above. No new roles/permissions system for who can "approve" a promotion — that's a process/discipline question (e.g., requiring a PR review before merge to `main`), not an infrastructure one, and is left to however the project owner already works, not decided here.
 
 ---
 
