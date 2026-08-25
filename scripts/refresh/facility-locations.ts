@@ -26,7 +26,7 @@
 // snapshots (to enumerate real facilities) and writes the separate
 // facility-location snapshot; `scripts/refresh/*.ts`'s own normalize steps
 // are what join this registry onto sessions, on the next `refresh:data` run.
-import { readJsonIfExists, writeSnapshotAtomic } from "../../lib/dropin/snapshot/io";
+import { createRefreshStorage, readLocalJsonIfExists, writeLocalJsonAtomic } from "../../lib/dropin/snapshot/io";
 import { facilityLocationsLatestPath, facilityLocationsPreviousPath, canonicalLatestPath } from "../../lib/dropin/snapshot/paths";
 import { municipalitySlug } from "../../lib/dropin/snapshot/paths";
 import { isValidGtaCoordinate } from "../../lib/dropin/coordinates";
@@ -72,11 +72,12 @@ type RawFacility = {
 // idempotent and the provenance trail honest.
 const SOURCES_WITH_NATIVE_COORDINATES = new Set(["Vaughan", "Markham", "Newmarket"]);
 
-function buildRawFacilityInventory(): Map<string, RawFacility> {
+async function buildRawFacilityInventory(): Promise<Map<string, RawFacility>> {
+  const storage = createRefreshStorage();
   const facilities = new Map<string, RawFacility>();
   for (const municipality of MUNICIPALITIES) {
     const slug = municipalitySlug(municipality);
-    const snapshot = readJsonIfExists<CanonicalSnapshot>(canonicalLatestPath(slug));
+    const snapshot = await storage.readJsonIfExists<CanonicalSnapshot>(canonicalLatestPath(slug));
     if (!snapshot) {
       console.warn(`[facility-locations] no canonical snapshot for ${municipality} yet — run refresh:data first. Skipping.`);
       continue;
@@ -232,10 +233,14 @@ function findSuspiciousDuplicateCoordinates(entries: FacilityLocationEntry[]): s
 }
 
 async function main() {
-  const raw = buildRawFacilityInventory();
+  const raw = await buildRawFacilityInventory();
   console.log(`[facility-locations] ${raw.size} real facility identities found across canonical snapshots.`);
 
-  const previousSnapshot = readJsonIfExists<FacilityLocationSnapshot>(facilityLocationsLatestPath());
+  // The facility-location registry itself is explicitly out of scope for
+  // the R2 migration (Phase 5B-2A) — small, infrequently updated, stays
+  // git-tracked. Always local, regardless of SNAPSHOT_STORAGE, even when
+  // the canonical snapshots this script reads FROM (above) come from R2.
+  const previousSnapshot = readLocalJsonIfExists<FacilityLocationSnapshot>(facilityLocationsLatestPath());
   const previousByKey = new Map((previousSnapshot?.entries ?? []).map((e) => [e.lookupKey, e]));
   if (previousSnapshot) {
     console.log(`[facility-locations] found an existing snapshot with ${previousSnapshot.entries.length} entries — already-resolved facilities will be reused, not re-derived.`);
@@ -288,7 +293,7 @@ async function main() {
     entries,
   };
 
-  writeSnapshotAtomic(facilityLocationsLatestPath(), facilityLocationsPreviousPath(), snapshot);
+  writeLocalJsonAtomic(facilityLocationsLatestPath(), facilityLocationsPreviousPath(), snapshot);
 
   console.log("\n" + "=".repeat(78));
   console.log("FACILITY LOCATION BUILD REPORT");

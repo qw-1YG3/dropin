@@ -1,17 +1,22 @@
-// Snapshot directory layout (Phase 3.3, Part 2/12):
+// Snapshot key layout (Phase 3.3, extended Phase 5B-2B for storage-backend
+// independence):
 //
-//   data/raw/<slug>/latest.json + previous.json
-//   data/canonical/<slug>/latest.json + previous.json
+//   canonical/<slug>/latest.json + previous.json
+//   raw/<slug>/latest.json + previous.json
 //
-// Two-slot retention (latest + previous) at each layer — "modest, simple"
-// per the phase's own instruction, not unbounded history. Both directories
-// are gitignored (see .gitignore) — generated/refreshed artifacts, not
-// committed source. Toronto's original bundled snapshot at
-// data/toronto-open-data/ is untouched and still committed; it now serves
-// as the offline fallback input for Toronto's raw-snapshot step (see
-// scripts/refresh/toronto.ts) rather than being read directly by the app.
-import path from "node:path";
-
+// These are backend-agnostic RELATIVE KEYS, not filesystem paths — Phase
+// 5B-2B introduced a second SnapshotStorage backend (Cloudflare R2,
+// lib/dropin/snapshot/io.ts) alongside the original local-filesystem one,
+// and a single key shape needs to mean the same thing to both: the local
+// backend resolves a key under data/ on disk, the R2 backend resolves the
+// same key under a production/ or staging/ prefix in the bucket. Nothing
+// here decides which backend is active or where the key physically lands
+// — that's io.ts's job. Two-slot retention (latest + previous) at each
+// layer — "modest, simple" per Phase 3.3's own instruction, unchanged by
+// the storage-backend split. Toronto's original bundled snapshot at
+// data/toronto-open-data/ is untouched and still committed to git; it
+// remains the offline fallback input for Toronto's raw-snapshot step (see
+// scripts/refresh/toronto.ts) regardless of which backend is active.
 export function municipalitySlug(name: string): string {
   return name
     .toLowerCase()
@@ -20,44 +25,43 @@ export function municipalitySlug(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-const DATA_ROOT = path.join(process.cwd(), "data");
-
 export function rawDir(slug: string): string {
-  return path.join(DATA_ROOT, "raw", slug);
+  return `raw/${slug}`;
 }
 
 export function canonicalDir(slug: string): string {
-  return path.join(DATA_ROOT, "canonical", slug);
+  return `canonical/${slug}`;
 }
 
 export function rawLatestPath(slug: string): string {
-  return path.join(rawDir(slug), "latest.json");
+  return `${rawDir(slug)}/latest.json`;
 }
 
 export function rawPreviousPath(slug: string): string {
-  return path.join(rawDir(slug), "previous.json");
+  return `${rawDir(slug)}/previous.json`;
 }
 
 export function canonicalLatestPath(slug: string): string {
-  return path.join(canonicalDir(slug), "latest.json");
+  return `${canonicalDir(slug)}/latest.json`;
 }
 
 export function canonicalPreviousPath(slug: string): string {
-  return path.join(canonicalDir(slug), "previous.json");
+  return `${canonicalDir(slug)}/previous.json`;
 }
 
 // Phase 4.1 — one facility-location registry shared across all
 // municipalities (cross-cutting reference data, not per-source raw/
 // canonical session data), built by its own separate, deliberate process
 // (scripts/refresh/facility-locations.ts) rather than the routine
-// per-municipality data refresh. Same two-slot latest/previous retention
-// and the same SnapshotStorage abstraction as every other snapshot.
-const FACILITY_LOCATIONS_DIR = path.join(DATA_ROOT, "facility-locations");
-
+// per-municipality data refresh. Explicitly OUT OF SCOPE for the Phase
+// 5B-2B R2 migration (Phase 5B-2A's approved architecture) — small
+// (~210KB), infrequently updated, stays git-tracked. Always resolved via
+// the local-only helpers in io.ts, never through the R2-capable storage
+// selection, regardless of SNAPSHOT_STORAGE.
 export function facilityLocationsLatestPath(): string {
-  return path.join(FACILITY_LOCATIONS_DIR, "latest.json");
+  return "facility-locations/latest.json";
 }
 
 export function facilityLocationsPreviousPath(): string {
-  return path.join(FACILITY_LOCATIONS_DIR, "previous.json");
+  return "facility-locations/previous.json";
 }

@@ -9,9 +9,11 @@
     "lint": "eslint",
     "refresh:data": "tsx scripts/refresh/index.ts",
     "refresh:facilities": "tsx scripts/refresh/facility-locations.ts",
-    "snapshot:health": "tsx scripts/snapshot-health.ts"
+    "snapshot:health": "tsx scripts/snapshot-health.ts",
+    "migrate:r2": "tsx scripts/migrate-to-r2.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1118.0",
     "next": "16.2.12",
     "react": "19.2.4",
     "react-dom": "19.2.4"

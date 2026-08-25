@@ -8,7 +8,7 @@
 // — adding municipality #4 later means adding a refresh script and a
 // snapshot directory, not touching this file.
 import { statSync } from "node:fs";
-import { readJsonIfExists } from "../snapshot/io";
+import { createAppReadStorage, isR2StorageMode, resolveLocalSnapshotPath } from "../snapshot/io";
 import { canonicalLatestPath } from "../snapshot/paths";
 import type { CanonicalSnapshot } from "../snapshot/types";
 import { normalizeTorontoSessions, type RawDropInRecord, type RawLocation } from "./toronto";
@@ -55,29 +55,50 @@ async function loadTorontoFallback(): Promise<Session[]> {
   return sessions;
 }
 
+// Phase 5B-2B: two backends now sit behind this function, selected
+// entirely by SNAPSHOT_STORAGE (see ../snapshot/io.ts) — never by
+// municipality. Local mode keeps its original mtime-based cache (a real
+// OS file has a free, cheap freshness signal; skipping a re-parse of an
+// unchanged multi-megabyte JSON file on every request was the whole
+// point of that cache, Phase 3.3 Part 25). R2 has no equivalent free
+// signal, so R2 mode reads fresh on every request instead — a deliberate,
+// documented simplification, not an oversight (Phase 5B-1 §5): DropIn's
+// traffic and R2's free-tier request limits both leave ample headroom for
+// this at DropIn's current scale, and a cache can be added back later if
+// that ever stops being true.
 async function loadMunicipalitySessions(slug: (typeof MUNICIPALITY_SLUGS)[number]): Promise<Session[]> {
-  const filePath = canonicalLatestPath(slug);
+  const key = canonicalLatestPath(slug);
 
-  let mtimeMs: number | undefined;
-  try {
-    mtimeMs = statSync(filePath).mtimeMs;
-  } catch {
-    // No snapshot file exists at all yet.
-    if (slug === "toronto") return loadTorontoFallback();
-    console.warn(`[sources] no canonical snapshot found for "${slug}" — run "npm run refresh:data" to populate it. Returning no sessions for this municipality until then.`);
-    return [];
+  if (!isR2StorageMode()) {
+    let mtimeMs: number | undefined;
+    try {
+      mtimeMs = statSync(resolveLocalSnapshotPath(key)).mtimeMs;
+    } catch {
+      // No snapshot file exists at all yet.
+      if (slug === "toronto") return loadTorontoFallback();
+      console.warn(`[sources] no canonical snapshot found for "${slug}" — run "npm run refresh:data" to populate it. Returning no sessions for this municipality until then.`);
+      return [];
+    }
+
+    const cached = snapshotCache.get(slug);
+    if (cached && cached.mtimeMs === mtimeMs) return cached.sessions;
+
+    const snapshot = await createAppReadStorage().readJsonIfExists<CanonicalSnapshot>(key);
+    if (!snapshot) {
+      if (slug === "toronto") return loadTorontoFallback();
+      return [];
+    }
+
+    snapshotCache.set(slug, { mtimeMs, sessions: snapshot.sessions });
+    return snapshot.sessions;
   }
 
-  const cached = snapshotCache.get(slug);
-  if (cached && cached.mtimeMs === mtimeMs) return cached.sessions;
-
-  const snapshot = readJsonIfExists<CanonicalSnapshot>(filePath);
+  const snapshot = await createAppReadStorage().readJsonIfExists<CanonicalSnapshot>(key);
   if (!snapshot) {
     if (slug === "toronto") return loadTorontoFallback();
+    console.warn(`[sources] no canonical snapshot found for "${slug}" in R2 — run the refresh pipeline to populate it. Returning no sessions for this municipality until then.`);
     return [];
   }
-
-  snapshotCache.set(slug, { mtimeMs, sessions: snapshot.sessions });
   return snapshot.sessions;
 }
 

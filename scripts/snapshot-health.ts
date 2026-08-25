@@ -6,7 +6,7 @@
 // Usage:
 //   npm run snapshot:health
 //   npm run snapshot:health -- --json
-import { readJsonIfExists } from "../lib/dropin/snapshot/io";
+import { createRefreshStorage } from "../lib/dropin/snapshot/io";
 import { canonicalLatestPath, canonicalPreviousPath, rawLatestPath, municipalitySlug } from "../lib/dropin/snapshot/paths";
 import type { CanonicalSnapshot, RawSnapshot } from "../lib/dropin/snapshot/types";
 
@@ -44,20 +44,27 @@ type HealthEntry = {
   raw?: { recordCount: number; status: string };
 };
 
-function collectHealth(): HealthEntry[] {
-  return MUNICIPALITIES.map((municipality) => {
-    const slug = municipalitySlug(municipality);
-    const canonical = readJsonIfExists<CanonicalSnapshot>(canonicalLatestPath(slug));
-    const previous = readJsonIfExists<CanonicalSnapshot>(canonicalPreviousPath(slug));
-    const raw = readJsonIfExists<RawSnapshot>(rawLatestPath(slug));
-    return {
-      municipality,
-      freshness: classifyFreshness(canonical?.metadata.fetchedAt),
-      canonical: canonical?.metadata,
-      previous: previous ? { canonicalSessionCount: previous.metadata.canonicalSessionCount, fetchedAt: previous.metadata.fetchedAt } : undefined,
-      raw: raw ? { recordCount: raw.metadata.recordCount, status: raw.metadata.status } : undefined,
-    };
-  });
+// Health checks against whichever backend the refresh pipeline itself
+// uses (SNAPSHOT_STORAGE) — an operator/refresh-adjacent tool, so it uses
+// the refresh (read+write-capable) credential context, same as
+// scripts/refresh/*, not the application's read-only one.
+async function collectHealth(): Promise<HealthEntry[]> {
+  const storage = createRefreshStorage();
+  return Promise.all(
+    MUNICIPALITIES.map(async (municipality) => {
+      const slug = municipalitySlug(municipality);
+      const canonical = await storage.readJsonIfExists<CanonicalSnapshot>(canonicalLatestPath(slug));
+      const previous = await storage.readJsonIfExists<CanonicalSnapshot>(canonicalPreviousPath(slug));
+      const raw = await storage.readJsonIfExists<RawSnapshot>(rawLatestPath(slug));
+      return {
+        municipality,
+        freshness: classifyFreshness(canonical?.metadata.fetchedAt),
+        canonical: canonical?.metadata,
+        previous: previous ? { canonicalSessionCount: previous.metadata.canonicalSessionCount, fetchedAt: previous.metadata.fetchedAt } : undefined,
+        raw: raw ? { recordCount: raw.metadata.recordCount, status: raw.metadata.status } : undefined,
+      };
+    }),
+  );
 }
 
 function printHuman(entries: HealthEntry[]): void {
@@ -86,10 +93,17 @@ function printHuman(entries: HealthEntry[]): void {
   console.log("");
 }
 
-const json = process.argv.includes("--json");
-const entries = collectHealth();
-if (json) {
-  console.log(JSON.stringify({ generatedAt: new Date().toISOString(), municipalities: entries }));
-} else {
-  printHuman(entries);
+async function main() {
+  const json = process.argv.includes("--json");
+  const entries = await collectHealth();
+  if (json) {
+    console.log(JSON.stringify({ generatedAt: new Date().toISOString(), municipalities: entries }));
+  } else {
+    printHuman(entries);
+  }
 }
+
+main().catch((err) => {
+  console.error("[snapshot-health] fatal error:", err);
+  process.exit(1);
+});

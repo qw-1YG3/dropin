@@ -1,40 +1,38 @@
-// Atomic snapshot read/write (Phase 3.3). Phase 3.3B adds one seam here,
-// no behavior change: a `SnapshotStorage` interface describes what any
-// backend must support, with `LocalFilesystemSnapshotStorage` as the only
-// implementation today. Every call site (refresh scripts, the app's read
-// path) already goes through the plain `readJsonIfExists`/
-// `writeSnapshotAtomic` functions at the bottom of this file, which are now
-// thin wrappers around `defaultSnapshotStorage` — so nothing outside this
-// file needed to change. The reason to separate this now rather than
-// later: Phase 3.3B's deployment audit found the current local-filesystem
-// assumption only holds on a persistent server/container (see
-// docs/PHASE_3_3B_SCHEDULER_DEPLOYMENT_STRATEGY.md Part 2) — if a future
-// deployment model ever needs object storage instead, that becomes a new
-// class implementing this same interface, not a rewrite of every call
-// site. No cloud SDK or credentials are introduced here — this is the
-// interface only, deliberately, per that document's Part 21.
+// Snapshot storage (Phase 3.3, extended Phase 5B-2B). Two real
+// implementations of one interface: LocalFilesystemSnapshotStorage
+// (development, and the local-verification step of the new-municipality
+// workflow) and R2SnapshotStorage (production, Cloudflare R2 — Phase
+// 5B-2A's approved bucket/credential architecture). Selection is entirely
+// environment-driven (SNAPSHOT_STORAGE=r2), never municipality-specific —
+// every call site asks for "the app's read storage" or "the refresh
+// pipeline's storage" and gets whichever backend is configured, without
+// knowing or caring which one it is.
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, copyFileSync } from "node:fs";
 import path from "node:path";
+import { S3Client, GetObjectCommand, PutObjectCommand, CopyObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 
 export interface SnapshotStorage {
-  readJsonIfExists<T>(key: string): T | undefined;
+  readJsonIfExists<T>(key: string): Promise<T | undefined>;
   // Rotates whatever currently exists at `key` into `previousKey` (if
-  // anything does), then atomically activates `data` at `key`. Must never
-  // leave a reader able to observe a partially-written value at `key`.
-  writeAtomic(key: string, previousKey: string, data: unknown): void;
+  // anything does), then activates `data` at `key` such that a reader can
+  // never observe a partially-written value — the specific mechanism
+  // differs by backend (POSIX rename locally, a single atomic PUT on R2 —
+  // see R2SnapshotStorage below) but the guarantee is identical.
+  writeAtomic(key: string, previousKey: string, data: unknown): Promise<void>;
 }
 
-// "key" is a plain filesystem path for this implementation — an object-
-// storage implementation would instead treat it as a bucket key, but the
-// call sites (paths.ts's path.join-based helpers) don't need to know or
-// care which.
+const LOCAL_DATA_ROOT = path.join(process.cwd(), "data");
+
 export class LocalFilesystemSnapshotStorage implements SnapshotStorage {
-  readJsonIfExists<T>(filePath: string): T | undefined {
+  async readJsonIfExists<T>(key: string): Promise<T | undefined> {
+    const filePath = path.join(LOCAL_DATA_ROOT, key);
     if (!existsSync(filePath)) return undefined;
     return JSON.parse(readFileSync(filePath, "utf-8")) as T;
   }
 
-  writeAtomic(finalPath: string, previousPath: string, data: unknown): void {
+  async writeAtomic(key: string, previousKey: string, data: unknown): Promise<void> {
+    const finalPath = path.join(LOCAL_DATA_ROOT, key);
+    const previousPath = path.join(LOCAL_DATA_ROOT, previousKey);
     const dir = path.dirname(finalPath);
     mkdirSync(dir, { recursive: true });
 
@@ -58,17 +56,190 @@ export class LocalFilesystemSnapshotStorage implements SnapshotStorage {
   }
 }
 
-export const defaultSnapshotStorage: SnapshotStorage = new LocalFilesystemSnapshotStorage();
+export type R2Config = {
+  accountId: string;
+  bucketName: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  // "production" or "staging" (Phase 5A §14) — prepended to every key this
+  // instance resolves, so the same relative key (e.g.
+  // "canonical/toronto/latest.json") lands in a completely separate part
+  // of the bucket depending on which prefix this instance was built with.
+  keyPrefix: string;
+};
 
-export function readJsonIfExists<T>(filePath: string): T | undefined {
-  return defaultSnapshotStorage.readJsonIfExists<T>(filePath);
+function isNotFoundError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const name = "name" in err ? String((err as { name?: unknown }).name) : "";
+  const metadata = "$metadata" in err ? (err as { $metadata?: { httpStatusCode?: number } }).$metadata : undefined;
+  return name === "NoSuchKey" || name === "NotFound" || metadata?.httpStatusCode === 404;
 }
 
-// Writes `data` to `finalPath` atomically, rotating whatever was previously
-// at `finalPath` into `previousPath` first (two-slot retention). Throws if
-// the write can't be verified — callers must not treat a thrown error here
-// as "the old snapshot is gone," since the old file is never touched until
-// the very last step.
-export function writeSnapshotAtomic(finalPath: string, previousPath: string, data: unknown): void {
-  defaultSnapshotStorage.writeAtomic(finalPath, previousPath, data);
+export class R2SnapshotStorage implements SnapshotStorage {
+  private readonly client: S3Client;
+
+  constructor(private readonly config: R2Config) {
+    // R2's S3-compatible endpoint — Cloudflare's own documented shape,
+    // confirmed live during the Phase 5B-1 preflight. "auto" is R2's own
+    // required region value, not a real AWS region.
+    this.client = new S3Client({
+      region: "auto",
+      endpoint: `https://${config.accountId}.r2.cloudflarestorage.com`,
+      credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
+    });
+  }
+
+  private resolveKey(key: string): string {
+    return `${this.config.keyPrefix}/${key}`;
+  }
+
+  async readJsonIfExists<T>(key: string): Promise<T | undefined> {
+    try {
+      const res = await this.client.send(new GetObjectCommand({ Bucket: this.config.bucketName, Key: this.resolveKey(key) }));
+      const text = await res.Body?.transformToString("utf-8");
+      if (text === undefined) return undefined;
+      return JSON.parse(text) as T;
+    } catch (err) {
+      if (isNotFoundError(err)) return undefined;
+      // Anything else (auth failure, network error, malformed JSON) is a
+      // real problem — surfaced to the caller, never silently treated as
+      // "no snapshot exists" the way a genuine 404 is.
+      throw err;
+    }
+  }
+
+  private async objectExists(key: string): Promise<boolean> {
+    try {
+      await this.client.send(new HeadObjectCommand({ Bucket: this.config.bucketName, Key: key }));
+      return true;
+    } catch (err) {
+      if (isNotFoundError(err)) return false;
+      throw err;
+    }
+  }
+
+  async writeAtomic(key: string, previousKey: string, data: unknown): Promise<void> {
+    const json = JSON.stringify(data, null, 2);
+    // Round-trip check, mirroring the local implementation's own safety
+    // step — cheap, and catches a non-serializable value before anything
+    // touches the network.
+    JSON.parse(json);
+
+    const finalKey = this.resolveKey(key);
+    const previousFullKey = this.resolveKey(previousKey);
+
+    // Rotate first: if something is already active at `latest`, copy it to
+    // `previous` (R2's native server-side copy — no download/re-upload
+    // round trip) before the new data is written anywhere.
+    if (await this.objectExists(finalKey)) {
+      await this.client.send(
+        new CopyObjectCommand({
+          Bucket: this.config.bucketName,
+          CopySource: `${this.config.bucketName}/${finalKey}`,
+          Key: previousFullKey,
+        }),
+      );
+    }
+
+    // A single PUT to one key is atomic on R2/S3 — a reader always
+    // observes either the fully-old or the fully-new object, never a
+    // partial write. This is the R2-native equivalent of the local
+    // implementation's write-temp-then-rename pattern: there is no
+    // durable "temp" object at any point, because none is needed (Phase
+    // 5B-1 §5).
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.config.bucketName,
+        Key: finalKey,
+        Body: json,
+        ContentType: "application/json",
+      }),
+    );
+  }
+}
+
+export function isR2StorageMode(): boolean {
+  return process.env.SNAPSHOT_STORAGE === "r2";
+}
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required when SNAPSHOT_STORAGE=r2`);
+  return value;
+}
+
+function r2Credentials(kind: "read" | "write"): { accessKeyId: string; secretAccessKey: string } {
+  return kind === "read"
+    ? { accessKeyId: requireEnv("R2_READ_ACCESS_KEY_ID"), secretAccessKey: requireEnv("R2_READ_SECRET_ACCESS_KEY") }
+    : { accessKeyId: requireEnv("R2_WRITE_ACCESS_KEY_ID"), secretAccessKey: requireEnv("R2_WRITE_SECRET_ACCESS_KEY") };
+}
+
+// The application's own read path (lib/dropin/sources/index.ts). Always
+// read-only credentials — this function has no way to construct a
+// write-capable instance, by design, not merely by convention. Defaults
+// to the production prefix; a specific Preview deployment can opt into
+// staging data via R2_KEY_PREFIX (Phase 5A §14) — the prefix choice never
+// changes which credential is used.
+export function createAppReadStorage(): SnapshotStorage {
+  if (!isR2StorageMode()) return new LocalFilesystemSnapshotStorage();
+  return new R2SnapshotStorage({
+    accountId: requireEnv("R2_ACCOUNT_ID"),
+    bucketName: requireEnv("R2_BUCKET_NAME"),
+    ...r2Credentials("read"),
+    keyPrefix: process.env.R2_KEY_PREFIX || "production",
+  });
+}
+
+// The refresh pipeline's own path (scripts/refresh/*). Write-capable
+// credentials, always the production prefix — a staging upload for the
+// new-municipality preview case (Phase 5A §14) is a separate, explicit,
+// manual step, never something the routine automated refresh does.
+export function createRefreshStorage(): SnapshotStorage {
+  if (!isR2StorageMode()) return new LocalFilesystemSnapshotStorage();
+  return new R2SnapshotStorage({
+    accountId: requireEnv("R2_ACCOUNT_ID"),
+    bucketName: requireEnv("R2_BUCKET_NAME"),
+    ...r2Credentials("write"),
+    keyPrefix: "production",
+  });
+}
+
+// data/facility-locations/ is explicitly out of scope for the R2
+// migration (Phase 5B-2A's approved architecture) — small, infrequently
+// updated, stays git-tracked. Always local and always synchronous,
+// regardless of SNAPSHOT_STORAGE — this data never needs to participate
+// in the async, R2-capable interface above at all.
+export function readLocalJsonIfExists<T>(key: string): T | undefined {
+  const filePath = path.join(LOCAL_DATA_ROOT, key);
+  if (!existsSync(filePath)) return undefined;
+  return JSON.parse(readFileSync(filePath, "utf-8")) as T;
+}
+
+export function writeLocalJsonAtomic(key: string, previousKey: string, data: unknown): void {
+  const finalPath = path.join(LOCAL_DATA_ROOT, key);
+  const previousPath = path.join(LOCAL_DATA_ROOT, previousKey);
+  const dir = path.dirname(finalPath);
+  mkdirSync(dir, { recursive: true });
+
+  const tmpPath = path.join(dir, `.tmp-${path.basename(finalPath)}-${process.pid}-${Date.now()}`);
+  const json = JSON.stringify(data, null, 2);
+  writeFileSync(tmpPath, json, "utf-8");
+  try {
+    JSON.parse(readFileSync(tmpPath, "utf-8"));
+  } catch (err) {
+    unlinkSync(tmpPath);
+    throw new Error(`writeLocalJsonAtomic: temp file failed round-trip validation, not activated: ${err}`);
+  }
+  if (existsSync(finalPath)) {
+    copyFileSync(finalPath, previousPath);
+  }
+  renameSync(tmpPath, finalPath);
+}
+
+// Used only by the app's local-mode mtime-based cache (Phase 3.3 perf
+// optimization, lib/dropin/sources/index.ts) — a real OS path is needed
+// for statSync(), which has no R2 equivalent. Local mode only; R2 mode
+// reads fresh every request instead (see that file for why).
+export function resolveLocalSnapshotPath(key: string): string {
+  return path.join(LOCAL_DATA_ROOT, key);
 }

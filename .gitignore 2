@@ -32,10 +32,6 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
-# .env.example documents expected variable NAMES only (Phase 5B-2B) — no
-# real values ever belong in it; tracked deliberately, unlike every other
-# .env* file above.
-!.env.example
 
 # vercel
 .vercel

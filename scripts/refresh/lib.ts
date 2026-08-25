@@ -4,12 +4,29 @@
 // genuinely identical across sources: building/writing the two snapshot
 // layers, validating before activation, and producing one consistent
 // report row per source (Part 21).
-import { writeSnapshotAtomic, readJsonIfExists } from "../../lib/dropin/snapshot/io";
+import { createRefreshStorage } from "../../lib/dropin/snapshot/io";
 import { rawLatestPath, rawPreviousPath, canonicalLatestPath, canonicalPreviousPath } from "../../lib/dropin/snapshot/paths";
 import { validateCanonicalSessions, checkCountCollapse } from "../../lib/dropin/snapshot/validate";
 import { CANONICAL_SCHEMA_VERSION, type CanonicalSnapshot, type RawSnapshot, type SourceFreshness } from "../../lib/dropin/snapshot/types";
 import { enrichSessionsWithFacilityLocations, loadFacilityLocationLookup } from "../../lib/dropin/facility-locations";
 import type { Session } from "../../lib/dropin/types";
+import type { SnapshotStorage } from "../../lib/dropin/snapshot/io";
+
+// Best-effort debug write on an already-known failure path (normalization,
+// validation, or count-collapse rejection) — the raw fetch is real
+// evidence worth keeping regardless, but a failure writing *this* copy is
+// secondary to the original failure and must never crash the run or
+// replace the original failureReason. Returns a warning string to fold
+// into the report if the debug write itself failed, or undefined if it
+// succeeded (or wasn't attempted for another already-reported reason).
+async function tryWriteRawDebugSnapshot(storage: SnapshotStorage, slug: string, rawSnapshot: RawSnapshot): Promise<string | undefined> {
+  try {
+    await storage.writeAtomic(rawLatestPath(slug), rawPreviousPath(slug), rawSnapshot);
+    return undefined;
+  } catch (err) {
+    return `also failed to write debug raw snapshot: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
 
 export type SourceReport = {
   source: string;
@@ -33,6 +50,7 @@ export async function refreshOneSource(params: {
 }): Promise<SourceReport> {
   const start = Date.now();
   const { municipalitySlug: slug, municipalityName, sourceProvider } = params;
+  const storage = createRefreshStorage();
 
   let raw: unknown;
   let recordCount = 0;
@@ -67,8 +85,10 @@ export async function refreshOneSource(params: {
     // Even though normalization failed, the raw fetch succeeded and is
     // real evidence of what the source returned — write it anyway so a
     // human can inspect why normalization choked, but do not touch the
-    // canonical snapshot.
-    writeSnapshotAtomic(rawLatestPath(slug), rawPreviousPath(slug), rawSnapshot);
+    // canonical snapshot. A failure writing this debug copy is real but
+    // secondary — noted alongside the original reason, never allowed to
+    // mask it or crash the whole refresh run.
+    const debugWriteWarning = await tryWriteRawDebugSnapshot(storage, slug, rawSnapshot);
     return {
       source: sourceProvider,
       municipality: municipalityName,
@@ -76,7 +96,7 @@ export async function refreshOneSource(params: {
       rawRecordCount: recordCount,
       durationMs: Date.now() - start,
       activated: false,
-      warnings: [],
+      warnings: debugWriteWarning ? [debugWriteWarning] : [],
       failureReason: `normalization failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
@@ -98,7 +118,7 @@ export async function refreshOneSource(params: {
 
   const validation = validateCanonicalSessions(enrichedSessions, municipalityName);
   if (!validation.ok) {
-    writeSnapshotAtomic(rawLatestPath(slug), rawPreviousPath(slug), rawSnapshot);
+    const debugWriteWarning = await tryWriteRawDebugSnapshot(storage, slug, rawSnapshot);
     return {
       source: sourceProvider,
       municipality: municipalityName,
@@ -107,16 +127,20 @@ export async function refreshOneSource(params: {
       canonicalSessionCount: enrichedSessions.length,
       durationMs: Date.now() - start,
       activated: false,
-      warnings,
+      warnings: debugWriteWarning ? [...warnings, debugWriteWarning] : warnings,
       failureReason: `canonical validation failed: ${validation.errors.join("; ")}`,
     };
   }
   warnings.push(...validation.warnings);
 
-  const previousCanonical = readJsonIfExists<CanonicalSnapshot>(canonicalLatestPath(slug));
-  const collapseCheck = checkCountCollapse(enrichedSessions.length, previousCanonical?.metadata.canonicalSessionCount);
-  if (!collapseCheck.ok) {
-    writeSnapshotAtomic(rawLatestPath(slug), rawPreviousPath(slug), rawSnapshot);
+  // Reading the previous canonical snapshot is itself part of the safety
+  // check below — if this read fails for a reason other than "nothing
+  // exists yet" (e.g. an R2 auth/network problem), that's a real failure,
+  // not silently treated as "no previous snapshot, allow anything through".
+  let previousCanonical: CanonicalSnapshot | undefined;
+  try {
+    previousCanonical = await storage.readJsonIfExists<CanonicalSnapshot>(canonicalLatestPath(slug));
+  } catch (err) {
     return {
       source: sourceProvider,
       municipality: municipalityName,
@@ -126,12 +150,24 @@ export async function refreshOneSource(params: {
       durationMs: Date.now() - start,
       activated: false,
       warnings,
+      failureReason: `could not read previous canonical snapshot for count-collapse comparison: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  const collapseCheck = checkCountCollapse(enrichedSessions.length, previousCanonical?.metadata.canonicalSessionCount);
+  if (!collapseCheck.ok) {
+    const debugWriteWarning = await tryWriteRawDebugSnapshot(storage, slug, rawSnapshot);
+    return {
+      source: sourceProvider,
+      municipality: municipalityName,
+      fetchStatus: "failure",
+      rawRecordCount: recordCount,
+      canonicalSessionCount: enrichedSessions.length,
+      durationMs: Date.now() - start,
+      activated: false,
+      warnings: debugWriteWarning ? [...warnings, debugWriteWarning] : warnings,
       failureReason: collapseCheck.reason,
     };
   }
-
-  // Everything validated — safe to activate both layers.
-  writeSnapshotAtomic(rawLatestPath(slug), rawPreviousPath(slug), rawSnapshot);
 
   const canonicalSnapshot: CanonicalSnapshot = {
     metadata: {
@@ -149,7 +185,31 @@ export async function refreshOneSource(params: {
     },
     sessions: enrichedSessions,
   };
-  writeSnapshotAtomic(canonicalLatestPath(slug), canonicalPreviousPath(slug), canonicalSnapshot);
+
+  // Everything validated — safe to promote. Raw first (debug/provenance
+  // layer, lower stakes), then canonical (the layer the app actually
+  // reads) — both real network/disk operations that can genuinely fail,
+  // never assumed to succeed. A failure here must leave whatever was
+  // previously active at `latest` completely untouched (guaranteed by
+  // writeAtomic's own rotate-then-atomic-promote sequencing, Phase 5B-1
+  // §5/§6) and must be surfaced as a real failure, never reported as a
+  // success.
+  try {
+    await storage.writeAtomic(rawLatestPath(slug), rawPreviousPath(slug), rawSnapshot);
+    await storage.writeAtomic(canonicalLatestPath(slug), canonicalPreviousPath(slug), canonicalSnapshot);
+  } catch (err) {
+    return {
+      source: sourceProvider,
+      municipality: municipalityName,
+      fetchStatus: "failure",
+      rawRecordCount: recordCount,
+      canonicalSessionCount: enrichedSessions.length,
+      durationMs: Date.now() - start,
+      activated: false,
+      warnings,
+      failureReason: `validated snapshot ready, but promotion failed — previous known-good snapshot left untouched: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 
   const ageJoinRate = normalized.ageJoin
     ? `${normalized.ageJoin.matchedSessions}/${normalized.ageJoin.totalSessions} (${((100 * normalized.ageJoin.matchedSessions) / Math.max(1, normalized.ageJoin.totalSessions)).toFixed(1)}%)`

@@ -14,7 +14,7 @@
 // already established for raw/canonical session snapshots.
 import type { Session } from "./types";
 import { isValidGtaCoordinate } from "./coordinates";
-import { readJsonIfExists } from "./snapshot/io";
+import { readLocalJsonIfExists } from "./snapshot/io";
 import { facilityLocationsLatestPath } from "./snapshot/paths";
 
 // Where a facility's coordinate actually came from — tracked for every
@@ -131,7 +131,7 @@ let cachedLookup: Map<string, FacilityLocationEntry> | undefined;
 
 export function loadFacilityLocationLookup(): Map<string, FacilityLocationEntry> {
   if (cachedLookup) return cachedLookup;
-  const snapshot = readJsonIfExists<FacilityLocationSnapshot>(facilityLocationsLatestPath());
+  const snapshot = readLocalJsonIfExists<FacilityLocationSnapshot>(facilityLocationsLatestPath());
   cachedLookup = snapshot ? buildFacilityLocationLookup(snapshot) : new Map();
   return cachedLookup;
 }
