@@ -366,6 +366,18 @@ No separate staging *application deployment* running continuously (Vercel's auto
 
 ---
 
+## 15. Launch Observability Strategy — Cross-Reference
+
+**Documentation only, recorded in full in `docs/LAUNCH_READINESS_PLAN.md` §11–§12 — not duplicated here, since it's fundamentally a Privacy-adjacent decision and belongs with that document's other Privacy commitments (§3.C already anticipated it).** Recorded briefly here too because it's the final Phase 5A decision before Phase 5B, and because its "Launch v1" candidate — Cloudflare Web Analytics — sits directly on top of the hosting stack this document already decided (Cloudflare is already in this architecture for DNS/email routing and R2 object storage, §3/§4/§9).
+
+**Summary of the decision** (full detail, including the binding Privacy-update procedure, in `docs/LAUNCH_READINESS_PLAN.md` §11): Cloudflare Web Analytics is the preferred launch-v1 option for lightweight, aggregate basic web analytics (visits, traffic trends, device/browser, referrers, geographic aggregates, Core Web Vitals) — **not implemented now**, subject to fresh verification against Cloudflare's real current documentation and DropIn's real network behavior at actual implementation time, consistent with every other externally-verified claim in this document (§3's Cloudflare-beta finding, §3's Vercel response-size limit — all fetched live, none assumed). Detailed product/behavioral analytics remain explicitly out of launch scope, deferred to their own dedicated future design phase (`docs/LAUNCH_READINESS_PLAN.md` §12).
+
+**Why this doesn't change anything already decided in §1–§14**: basic web analytics (if/when enabled) is a client-side script + a Cloudflare-side aggregation service, entirely orthogonal to the application hosting (§3), refresh pipeline (§2), dataset storage (§4), or preview/staging strategy (§14) — it reads/writes none of DropIn's own data and requires no change to any of those decisions. It's recorded here for completeness, not because it alters the architecture.
+
+**No analytics is enabled by this entry, and no Privacy copy was changed** — see `docs/LAUNCH_READINESS_PLAN.md` §11 for the full, binding requirement that governs whenever this actually gets implemented.
+
+---
+
 ## Final Report
 
 **A. Current data pipeline:** Fully mapped in §1 — municipal source → per-source-family fetch/normalize scripts → shared validate+enrich+atomic-write orchestration (`refreshOneSource`) → local-filesystem canonical snapshots → request-time read (`getAllSessions`) → `/api/sessions` → client. Git is currently the publication mechanism for two small, infrequent datasets (facility-locations, Toronto fallback) but explicitly not for the large, daily raw/canonical data — a distinction, not an oversight.

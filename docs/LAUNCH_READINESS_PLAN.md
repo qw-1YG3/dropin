@@ -38,7 +38,7 @@ Before launch, the Feedback experience should get its own UX/content review:
 
 - **A. Location** — why it's requested (distance display and Nearest-first ranking, per Phase 4.2/4.3B/4.4B) and that search itself never requires it.
 - **B. Location storage** — the current implementation (`useUserLocation`, `app/page.tsx`) holds coordinates in plain in-memory React state only; confirmed by repeated audit across Phases 4.2–4.4B that precise coordinates are never written to `localStorage`, a cookie, a URL, or Share text, and reset on reload. **This must be re-verified against whatever the final production build actually ships before the Privacy page asserts it** — this document records the current state, not a permanent guarantee independent of future code changes.
-- **C. Analytics/cookies** — do not claim "no analytics or cookies" until the production hosting/analytics stack is finalized (none exists yet as of this document). If analytics are added later, the Privacy page must be updated in the same change that adds them, not after.
+- **C. Analytics/cookies** — do not claim "no analytics or cookies" until the production hosting/analytics stack is finalized (none exists yet as of this document). If analytics are added later, the Privacy page must be updated in the same change that adds them, not after. See §11 for the recorded launch-observability decision this bullet anticipates.
 - **D. Feedback data** — if a future Feedback implementation collects an email or other identifying information, document what's collected, why, how it's used, and a proportionate retention policy, at the time that implementation ships (not before, since it doesn't exist yet — see §2).
 - **E. Hosting/technical logs** — the policy must account for whatever the eventual hosting provider logs at the infrastructure level (e.g., IP/request logs), once a hosting provider is actually chosen.
 - **F. Third-party destinations** — DropIn links out to municipal Official Listings and Google Maps/Directions; both have their own separate privacy practices the Privacy page should point to rather than restate.
@@ -132,6 +132,51 @@ Mobile usability stays a production requirement, not a nice-to-have. Before laun
 - DropIn must never be described as a registered charity or nonprofit, and no copy may imply charitable tax treatment (e.g. tax-receipt language) unless that status is genuinely obtained.
 - Any future payment integration is a new trust/security surface — handling money is categorically different from the read-only, no-account architecture this project has maintained throughout Phase 4 and Launch Readiness so far. It must trigger a **fresh privacy/security review before implementation**, not be folded into the existing Production Security & Privacy Readiness Audit (§7) as an afterthought, since that audit was scoped before this idea existed — and it must not be treated as reason to expand that audit's current scope now.
 
+## 11. Launch Observability Strategy
+
+**Status: decision recorded, nothing implemented.** No analytics of any kind is enabled today — confirmed by direct inspection (`app/page.tsx`, zero analytics/tracking code of any kind, unchanged by this entry). This section records the *decision* for when observability is actually built, not a change to current behavior, so the choice doesn't need to be rediscovered from scratch when that phase begins.
+
+DropIn needs lightweight post-launch visibility into whether the site is being used and whether the production experience is healthy — but "needs some visibility eventually" is not the same as "build it now," and the three kinds of visibility below are deliberately kept distinct rather than bundled into one decision or one tool.
+
+### Launch v1 — basic web analytics
+
+**Cloudflare Web Analytics is the preferred initial option**, subject to fresh verification during implementation (per this project's standing discipline: nothing about a third party's actual behavior is trusted from memory — it gets re-checked against that provider's real, current documentation and DropIn's own real, current network behavior at the time it's actually wired up, not assumed now). Its intended role is deliberately narrow: lightweight, aggregate website visibility only — visits/page views, traffic trends, device/browser information, referrers where available, geographic aggregate information where available, and web performance/Core Web Vitals where available. **Not implemented as part of this entry** — recorded as the intended direction only.
+
+### Privacy requirement — binding on whichever future phase implements this
+
+The current Privacy copy (`app/page.tsx`) states that DropIn does not currently use analytics. **That statement is correct today and must not change until analytics is actually enabled** — this document does not authorize an early Privacy-copy update, and none was made. When Cloudflare Web Analytics (or any analytics) is actually enabled in a future implementation phase, that phase must, in order:
+
+1. Verify its actual production data-collection behavior against Cloudflare's current documentation at that time (not this document's description of intent).
+2. Re-audit DropIn's actual network/client behavior in the real deployed build — the same "prove it, don't assume it" standard already applied throughout the Security & Deployment Audit.
+3. Update the Privacy notice so it accurately describes what is actually collected, in that same change — never a separate, later cleanup step.
+4. Not make broader privacy claims than what was actually technically verified.
+
+**Privacy copy must describe actual production behavior, not planned behavior** — this is the operative rule this whole entry exists to protect.
+
+### Product analytics — explicitly NOT launch scope
+
+Detailed behavioral/product analytics (e.g. search performed, zero-result search, normalized activity/category searched, municipality searched, Nearest First enabled, location permission outcome, list/grid view selection, Decision Sheet opened, Directions clicked, Official Listing clicked) are explicitly deferred — **not implemented, not designed in detail, listed here only as illustrative examples of the category being deferred.** See §12 for the formal backlog entry.
+
+Before any future product-analytics implementation, it needs its own dedicated analytics/privacy design phase, covering at minimum: event schema, data minimization, retention, raw search-query handling specifically, location privacy, whether identifiers are necessary at all, and the resulting Privacy-notice changes. **Prefer aggregate/normalized information over storing raw user-entered search queries whenever practical** — a principle to carry into that future design phase, not a design decided here.
+
+### Architecture principle — three separate concerns, not one
+
+DropIn should keep these distinct, and they should not automatically share the same data or tooling merely because they're all loosely "analytics":
+
+1. **Operational observability** — is the site/data pipeline healthy? (Already partly covered by existing tooling — `npm run snapshot:health`'s FRESH/AGING/STALE/UNAVAILABLE classification, GitHub Actions' failure-email notification — both recorded in `docs/PHASE_5A_HOSTING_REFRESH_ARCHITECTURE.md` §5/§6, unrelated to user-facing analytics of any kind.)
+2. **Basic web analytics** — is the site being visited and performing well? (§ Launch v1, above — Cloudflare Web Analytics, aggregate only.)
+3. **Product analytics** — how are people actually using DropIn? (§12, explicitly deferred, needs its own dedicated design phase before any implementation.)
+
+## 12. Future Backlog — Product Analytics (Not Implemented)
+
+**Status: backlog only.** No event tracking, no schema, no third-party product-analytics tool, and no Privacy-copy change has been made for this. Recorded here, in the same style as §10's "Support DropIn" entry, so it can be picked up as a defined item later rather than rediscovered from scratch.
+
+**Goal:** design a privacy-conscious DropIn product analytics system, only when actual usage justifies it — not merely because it would be interesting to have.
+
+**Do not implement during launch readiness or Phase 5.** Before any implementation, a dedicated analytics/privacy design phase must cover: event schema, data minimization, retention period, raw search-query handling (preferring aggregate/normalized data over storing what a user actually typed, wherever practical), location privacy (DropIn's existing, hard-won browser-only geolocation guarantee must not be quietly weakened by an analytics integration), whether persistent identifiers are necessary at all, and the required Privacy-notice changes — determined at that time, against that implementation's actual real behavior, not written speculatively now.
+
+**Illustrative examples of what this category *might* eventually cover** (not designed, not committed to, not exhaustive): search performed, zero-result search, normalized activity/category searched, municipality searched, Nearest First enabled, location permission outcome, list/grid view selection, Decision Sheet opened, Directions clicked, Official Listing clicked.
+
 ---
 
 ## Revision Notes
@@ -139,3 +184,4 @@ Mobile usability stays a production requirement, not a nice-to-have. Before laun
 - 2026-08-21 — Initial launch-readiness plan recorded per explicit user request, ahead of any implementation. Cross-references `docs/ARCHITECTURE.md` (source-of-truth principle), `docs/PHASE_4_0_GEOSPATIAL_READINESS_MAP_NECESSITY_AUDIT.md` (Map View deferral), `docs/PHASE_3_3_DATA_REFRESH_SNAPSHOT_PIPELINE.md` (snapshot gitignore/architecture), and `docs/PRODUCT_PRINCIPLES.md` (existing transparency principles) rather than duplicating their content. Noted, as a factual finding rather than a fix: the current Feedback "Send" action has no backing API call and doesn't actually transmit anything, despite its confirmation copy — flagged for the pre-launch Feedback review in §2, not corrected here.
 - 2026-08-24 — Added §10, recording a future optional "Support DropIn" contribution feature (PayPal candidate) as a not-yet-scoped idea, per explicit user request alongside a small, unrelated Privacy-sheet contact-link polish (`docs/LAUNCH_READINESS_1B_TRUST_PRIVACY_FEEDBACK_IMPLEMENTATION.md`). No implementation, no charity/tax-status claims, and a mandatory fresh privacy/security review before any future build.
 - 2026-08-24 — Expanded §10 into a formal backlog item per explicit user request: goal, current direction, potential future UX, and a 7-point before-implementation review checklist, with the hard constraints (no "Donate"/charity framing, mandatory fresh privacy/security review, no expansion of the current Security & Deployment Audit scope) carried forward unchanged. Documentation only — no UI, dependency, third-party script, or Privacy/About copy was added or changed.
+- 2026-08-25 — Added §11 (Launch Observability Strategy) and §12 (Future Backlog — Product Analytics), per explicit user request, as the final Phase 5A documentation item before Phase 5B. Records Cloudflare Web Analytics as the preferred launch-v1 basic-web-analytics option (subject to fresh verification at implementation time), the binding four-step Privacy-update requirement for whenever analytics is actually enabled, and the explicit deferral of detailed product analytics to its own future dedicated design phase. Also added a one-line cross-reference from §3.C to §11. Documentation only — analytics remains fully disabled (confirmed by direct inspection of `app/page.tsx`, unchanged), and the existing Privacy copy's "does not currently use analytics" claim remains accurate and was not touched.
