@@ -2117,7 +2117,11 @@ export default function SearchSurface() {
 
         <h3 className="mt-4 text-xs font-semibold text-sage-text">Contact</h3>
         <p className="mt-1 text-sm text-text-secondary">
-          Questions about privacy can be sent to {PUBLIC_CONTACT_EMAIL}.
+          Questions about privacy can be sent to{" "}
+          <a href={`mailto:${PUBLIC_CONTACT_EMAIL}`} className="text-sage-text underline underline-offset-2">
+            {PUBLIC_CONTACT_EMAIL}
+          </a>
+          .
         </p>
 
         <p className="mt-4 text-xs text-text-secondary/70">

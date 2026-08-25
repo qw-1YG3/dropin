@@ -101,8 +101,41 @@ Launch readiness is not a reason to build Map View. The Phase 4.0 decision (`doc
 
 Mobile usability stays a production requirement, not a nice-to-have. Before launch, verification is still needed (beyond what's already been checked per-phase) across: narrow-viewport layout, horizontal overflow, touch targets, modal behavior, location permission UX, search, date/activity controls, Nearest first, result cards, Directions, Official Listing, and the About/Feedback/Privacy surfaces once they exist. Physical-device verification should be performed when possible before launch — consistent with this project's established discipline (every phase from 4.2 onward) of never claiming physical-device validation that wasn't actually performed; structural/DOM-constraint verification and physical-device verification remain explicitly distinct and separately reported.
 
+## 10. Future Backlog — Support DropIn (Not Implemented)
+
+**Status: backlog only.** No UI, no dependency, no third-party script, and no Privacy/About copy change has been made for this. Recorded in full here so it can be picked up as a defined item later rather than rediscovered from scratch.
+
+**Goal:** explore an optional way for users who find DropIn useful to financially support the project and its ongoing operating costs.
+
+**Current direction:**
+- User-facing concept: **"Support DropIn"** — not "Donate," unless DropIn's legal/organizational status changes in the future (see the constraint below).
+- **PayPal** is currently the preferred first candidate for accepting voluntary contributions.
+- Contributions must remain completely optional and must never affect access to DropIn.
+- DropIn remains free to use, unconditionally.
+
+**Potential future UX** (direction only, not designed or built):
+- A small, non-intrusive "Support DropIn" entry point.
+- Copy explaining that contributions help support costs such as hosting, data maintenance, and continued development.
+- Kept visually secondary to the core recreation-search experience — consistent with this project's existing "Comfortable Before Beautiful" / "Reduce Thinking, Not Information" principles.
+- No aggressive fundraising prompts, pop-ups, or dark patterns.
+
+**Before implementation, work through:**
+1. Review PayPal integration options and fees.
+2. Determine whether an external PayPal payment page/link is preferable to an embedded integration.
+3. Review privacy implications, cookies, third-party scripts, and data sharing.
+4. Review security implications.
+5. Confirm appropriate wording around contributions and project status.
+6. Update Privacy / About disclosures if required.
+7. Confirm whether any accounting/tax obligations apply before accepting money.
+
+**Hard constraints, carried forward from when this item was first raised:**
+- DropIn must never be described as a registered charity or nonprofit, and no copy may imply charitable tax treatment (e.g. tax-receipt language) unless that status is genuinely obtained.
+- Any future payment integration is a new trust/security surface — handling money is categorically different from the read-only, no-account architecture this project has maintained throughout Phase 4 and Launch Readiness so far. It must trigger a **fresh privacy/security review before implementation**, not be folded into the existing Production Security & Privacy Readiness Audit (§7) as an afterthought, since that audit was scoped before this idea existed — and it must not be treated as reason to expand that audit's current scope now.
+
 ---
 
 ## Revision Notes
 
 - 2026-08-21 — Initial launch-readiness plan recorded per explicit user request, ahead of any implementation. Cross-references `docs/ARCHITECTURE.md` (source-of-truth principle), `docs/PHASE_4_0_GEOSPATIAL_READINESS_MAP_NECESSITY_AUDIT.md` (Map View deferral), `docs/PHASE_3_3_DATA_REFRESH_SNAPSHOT_PIPELINE.md` (snapshot gitignore/architecture), and `docs/PRODUCT_PRINCIPLES.md` (existing transparency principles) rather than duplicating their content. Noted, as a factual finding rather than a fix: the current Feedback "Send" action has no backing API call and doesn't actually transmit anything, despite its confirmation copy — flagged for the pre-launch Feedback review in §2, not corrected here.
+- 2026-08-24 — Added §10, recording a future optional "Support DropIn" contribution feature (PayPal candidate) as a not-yet-scoped idea, per explicit user request alongside a small, unrelated Privacy-sheet contact-link polish (`docs/LAUNCH_READINESS_1B_TRUST_PRIVACY_FEEDBACK_IMPLEMENTATION.md`). No implementation, no charity/tax-status claims, and a mandatory fresh privacy/security review before any future build.
+- 2026-08-24 — Expanded §10 into a formal backlog item per explicit user request: goal, current direction, potential future UX, and a 7-point before-implementation review checklist, with the hard constraints (no "Donate"/charity framing, mandatory fresh privacy/security review, no expansion of the current Security & Deployment Audit scope) carried forward unchanged. Documentation only — no UI, dependency, third-party script, or Privacy/About copy was added or changed.
