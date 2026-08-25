@@ -4,9 +4,29 @@
 // completed the Phase 5B-2A Cloudflare setup and configured R2 write
 // credentials locally (see docs/PHASE_5B2B_R2_STORAGE_INTEGRATION.md §9).
 //
-// Usage:
-//   SNAPSHOT_STORAGE=r2 npm run migrate:r2 -- --dry-run   (validate only, upload nothing)
-//   SNAPSHOT_STORAGE=r2 npm run migrate:r2                (validate, then upload)
+// Usage — note --env-file must precede the script path (a Node flag, not
+// a script argument), so this must be run via `npx tsx` directly rather
+// than through `npm run migrate:r2 -- ...` (npm's `--` only appends
+// arguments after the script path, where --env-file has no effect —
+// verified directly, not assumed):
+//
+//   npx tsx --env-file=.env.local scripts/migrate-to-r2.ts --dry-run
+//     (validate only, all 7, upload nothing)
+//   npx tsx --env-file=.env.local scripts/migrate-to-r2.ts --municipality=aurora --dry-run
+//     (validate one, upload nothing)
+//   npx tsx --env-file=.env.local scripts/migrate-to-r2.ts --municipality=aurora
+//     (validate + upload just one — the recommended first live-R2 check)
+//   npx tsx --env-file=.env.local scripts/migrate-to-r2.ts
+//     (validate + upload all 7 — only after a single-municipality run has
+//     already succeeded)
+//
+// .env.local should contain SNAPSHOT_STORAGE=r2 plus every R2_* credential
+// (see .env.example) — --env-file loads all of it in one step.
+//
+// --municipality is the recommended way to perform a first, smallest,
+// reversible live-R2 check before ever running a full 7-municipality
+// migration — same flag shape as `npm run refresh:data -- --municipality=X`,
+// for consistency.
 //
 // Every municipality's local canonical/<slug>/latest.json is validated
 // with the exact same validateCanonicalSessions() gate the routine daily
@@ -51,16 +71,27 @@ async function migrateOne(municipality: string, dryRun: boolean): Promise<Migrat
 
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
+  const municipalityArg = process.argv.find((a) => a.startsWith("--municipality="))?.split("=")[1];
 
   if (!isR2StorageMode()) {
     console.error("[migrate-to-r2] SNAPSHOT_STORAGE=r2 is not set — refusing to run. This script only makes sense when targeting R2; set SNAPSHOT_STORAGE=r2 (and the R2_* credentials) and try again.");
     process.exit(1);
   }
 
-  console.log(`[migrate-to-r2] ${dryRun ? "DRY RUN — validating only, nothing will be uploaded" : "LIVE — validated snapshots will be uploaded to R2"}\n`);
+  let targets = MUNICIPALITIES;
+  if (municipalityArg) {
+    const slug = municipalitySlug(municipalityArg);
+    targets = MUNICIPALITIES.filter((m) => municipalitySlug(m) === slug);
+    if (targets.length === 0) {
+      console.error(`[migrate-to-r2] Unknown municipality "${municipalityArg}". Known: ${MUNICIPALITIES.map((m) => municipalitySlug(m)).join(", ")}`);
+      process.exit(1);
+    }
+  }
+
+  console.log(`[migrate-to-r2] ${dryRun ? "DRY RUN — validating only, nothing will be uploaded" : "LIVE — validated snapshots will be uploaded to R2"} (${targets.length}/${MUNICIPALITIES.length} municipalit${targets.length === 1 ? "y" : "ies"} targeted)\n`);
 
   const results: MigrationResult[] = [];
-  for (const municipality of MUNICIPALITIES) {
+  for (const municipality of targets) {
     const result = await migrateOne(municipality, dryRun);
     results.push(result);
     console.log(`${result.municipality.padEnd(16)} ${result.outcome.padEnd(16)} ${result.detail}`);
