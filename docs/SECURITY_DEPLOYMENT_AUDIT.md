@@ -12,7 +12,7 @@
 
 - **`data/facility-locations/*.json`** and **`data/toronto-open-data/*.json`** are tracked in git by design — both are public municipal data (a facility coordinate registry DropIn derived, and Toronto's own published Open Data). Inspected `data/facility-locations/latest.json` directly: only name/address/coordinate fields, no secrets, no local paths.
 - **`data/raw/`** and **`data/canonical/`** (the per-run scraped/normalized snapshots) are correctly gitignored and were confirmed absent from `git log` history.
-- **`docs/`** is fully git-tracked (39 files). One finding here — see the `getdropin.team@gmail.com` item in §12, which is the only meaningful repository-exposure issue found in this directory.
+- **`docs/`** is fully git-tracked (39 files). One finding here — see the private-forwarding-address item in §12, which is the only meaningful repository-exposure issue found in this directory.
 - **`app/design/`** exists as a tracked, buildable route tree (the project's `/design` preview-environment convention, per `docs/PROJECT_WORKFLOW.md`). This is not a *repository* exposure problem — it's a *build output* problem, covered in full under §5 and §8, and is this audit's most significant finding.
 - No absolute `/Users/...` paths, no local usernames, no local IP addresses (other than the one `next.config.ts` entry handled in §12), no `localhost` references, and no personal filenames were found anywhere in tracked `.ts`/`.tsx`/`.md`/`.json` source (checked via repo-wide grep, excluding `node_modules` and `.next/`).
 - No build artifacts or temp files are tracked; `.next/` is correctly ignored.
@@ -184,7 +184,7 @@ None of these three log lines include user data, coordinates, personal informati
 ## 12. Personal/Project Separation Audit
 
 - **No personal email addresses in app-facing code.** `lib/dropin/contact.ts` correctly centralizes the two public project addresses (`hello@getdropin.ca`, `feedback@getdropin.ca`) that route through Cloudflare Email Routing to a private inbox. That private inbox address deliberately does **not** appear in source code or rendered output — confirmed by the code's own comment and by a repo-wide grep finding zero occurrences in `app/`, `lib/`, or any `.tsx`/`.ts` file.
-- **One real finding:** `docs/LAUNCH_READINESS_1B_TRUST_PRIVACY_FEEDBACK_IMPLEMENTATION.md:92` names the private destination inbox directly — `getdropin.team@gmail.com` — while documenting that it correctly does *not* appear in source/output. This doc file is git-tracked, and the repository has a GitHub remote (`https://github.com/qw-1YG3/dropin.git`). **This audit could not verify the visibility (public/private) of that GitHub repository** — no `gh` CLI is available/authenticated in this environment. This matters directly: if the repo is currently public, this is a **live exposure today**; if private, it's a landmine for whenever the repo is later made public (e.g., a Vercel-style deploy-from-public-repo flow, or open-sourcing). **Classified P1 pending visibility confirmation** — treat as P1 until confirmed private, then P2 (fix before ever making the repo public). Recommended fix either way: redact/generalize that one line (e.g., "the private forwarding destination") — small, low-risk, directly related to this exact finding, and explicitly documented here per this audit's fix policy. **Not applied in this audit** — reported for the user to action, since it wasn't unambiguously "P1 confirmed" without the visibility check.
+- **One real finding (remediated in working tree — see §14):** `docs/LAUNCH_READINESS_1B_TRUST_PRIVACY_FEEDBACK_IMPLEMENTATION.md:92` named the private destination inbox directly, while documenting that it correctly does *not* appear in source/output. This doc file is git-tracked, and the repository has a GitHub remote (`https://github.com/qw-1YG3/dropin.git`), **confirmed PUBLIC** via the unauthenticated GitHub API (`private: false`) — see §14 for the full remediation record, including the git-history status of this address.
 - `next.config.ts`'s `allowedDevOrigins: ["192.168.18.4"]` is a real developer-LAN-IP-in-source finding, but confirmed via official Next.js docs (§ prior session investigation, `node_modules/next/dist/docs/.../allowedDevOrigins.md`) to be dev-server-only with zero effect on `next build`/`next start` production behavior. **P3 — cosmetic**, worth removing on general cleanup grounds (a machine-specific value with no purpose in the shipped product) but zero security impact.
 - No developer name, no local username, no personal cloud/storage paths (e.g., iCloud/Dropbox paths), and no personal API accounts were found anywhere in tracked source — confirmed via repo-wide grep for the developer's name/username and for `/Users/` paths, both returning zero matches outside the one `.next/required-server-files.json` build artifact already assessed in §8 as non-exposed. `package.json` has no `author` field to assess (none present, not a finding).
 - This audit did **not** find or remove any legitimate authorship information, since none exists in a form this audit would need to distinguish from accidental exposure — there was nothing to preserve or redact on that front.
@@ -211,13 +211,59 @@ None of these three log lines include user data, coordinates, personal informati
 
 ---
 
+## 14. P1 Remediation Record (2026-08-24, post-audit follow-up)
+
+Both P1 findings from §13 were remediated in a focused follow-up pass. Nothing else in the audit's scope was touched.
+
+### P1-1 — `app/design/*` production exposure
+
+**First attempt (superseded):** a shared `app/design/layout.tsx` that called `notFound()` from `next/navigation` when `process.env.NODE_ENV === "production"`. This correctly returned an HTTP 404 status and rendered a visible 404 page — but a fresh `next build && next start` verification showed the **raw response body still embedded the complete serialized RSC payload of the real `/design` page** (every section title, every design-page label, every internal route path such as `/design/homepage-lowfi`) inside a hydration `<script>` tag, fully readable via `curl` or view-source even though the browser-rendered UI showed a 404. This did not meet the actual goal — "production visitors cannot access /design/*" means the content must not be transmitted, not just hidden from the rendered UI. This approach was discarded.
+
+**Final solution:** a `proxy.ts` file at the project root (Next.js 16 renamed "Middleware" to "Proxy" — confirmed via the bundled framework docs, `node_modules/next/dist/docs/01-app/01-getting-started/16-proxy.md` and the version-16 upgrade guide, since a `middleware.ts` file is deprecated and silently would not have been picked up correctly). It matches `/design` and `/design/:path*` and returns a bare `404` response **before Next.js resolves or renders any page** for that path, whenever `process.env.NODE_ENV === "production"`. Because the request is intercepted ahead of routing/rendering, no page component ever executes and no RSC payload is ever generated for that response — there is nothing to leak.
+
+This satisfies every constraint from the request: it is not noindex-only (real 404 status, and now genuinely empty of content), it is not obscurity (the path is actively blocked, not just unlinked), it adds no authentication infrastructure (no login, session, or credential check — a plain path-based routing guard), and it does not redesign the production app (zero changes to `app/page.tsx`, `app/layout.tsx`, or any production route). `app/design/*` source files are untouched and remain in the repository for Build Story / development-history purposes, exactly as requested.
+
+**Verified (fresh `next build` + `next start`, on an unused port to avoid disturbing any other running process):**
+- `/design` → `404`, `0` bytes, zero trace of design content (checked by grepping the raw response for page titles/labels).
+- `/design/homepage-lowfi`, `/design/colour-exploration`, `/design/homepage-highfi`, `/design/results-lowfi`, `/design/results-highfi`, `/design/results-card-variations` → all `404`, all `0` bytes.
+- `/` → unchanged, `200`, real app content.
+- `/api/sessions` → unchanged, `200`, full real session data.
+- `next dev` → `/design` still returns `200` with real content, confirming the internal design-review workflow described in `docs/PROJECT_WORKFLOW.md` keeps working locally.
+
+### P1-2 — Private forwarding address in documentation
+
+`docs/LAUNCH_READINESS_1B_TRUST_PRIVACY_FEEDBACK_IMPLEMENTATION.md:92` was edited to remove the literal address, replaced with neutral wording ("the private forwarding destination... its address and domain"). This document (`docs/SECURITY_DEPLOYMENT_AUDIT.md`) was also edited to remove the three mentions of the literal address introduced by the audit itself (§1, §12) — those were an artifact of documenting the finding, not a separate exposure, but they're redacted now that the finding is resolved. `lib/dropin/contact.ts` (the actual public-facing contact config) never contained the address and was not touched — `hello@getdropin.ca` and `feedback@getdropin.ca` are unchanged.
+
+**Git history / repository visibility investigation (performed before any edit, no destructive action taken):**
+- `git log --all -S"getdropin.team@gmail.com"` found the literal address in exactly two commits: `f517a32` ("About + Privacy + Feedback" — the original doc that introduced it) and `bfcc027` ("Security & Deployment Audit" — this audit's own first draft of this document, before this remediation pass redacted it).
+- Repository visibility was checked via an unauthenticated request to the public GitHub API (`GET https://api.github.com/repos/qw-1YG3/dropin`, no credentials sent) — response: `"private": false`. **The repository is confirmed public.**
+- Distinguishing the four exposure states the task asked for:
+  - **Current working tree:** clean — zero occurrences of the address anywhere, verified by a fresh repo-wide grep after the edit.
+  - **Current commit (HEAD, once this remediation is committed):** clean, for the same reason.
+  - **Historical git exposure:** **the address remains present in the two older commits (`f517a32`, `bfcc027`)** — editing the current file does not remove it from those commits' snapshots. This is retained history, not a working-tree issue.
+  - **Actual public internet exposure:** because the repository is confirmed public, those two historical commits — and the literal address in them — are reachable by anyone with the repository's URL (e.g., via `git clone` or GitHub's own commit-history / blame view), independent of what the current file on `main` says.
+- **No history rewrite, force-push, or repository deletion was performed** — per explicit instruction. This is a live, currently-existing exposure via git history (not merely a "landmine for if the repo is later made public" — the repo already is public), so a deliberate history-cleanup decision is worth making, but it is the user's call, not something to perform automatically: a rewrite of `main`'s history on a public repo has real consequences (breaks any existing clones/forks, requires a coordinated force-push) that go beyond this audit's authorized scope. **Recommendation, not action taken:** if fully scrubbing this from history is wanted, that means rewriting the two affected commits (e.g., via `git filter-repo`) and force-pushing `main` — a deliberate, separate, explicitly-authorized action, not a "small necessary security fix." Given the exposed item is a private contact address (not a credential — it grants no access to anything) the practical severity of leaving it in history is low, but the decision should still be made consciously rather than left implicit.
+
+### Verification suite (run after both fixes)
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` | Passes cleanly (0 errors) |
+| `npm run lint` | 21 problems (16 errors, 5 warnings) — **identical count with the fix stashed out**, confirming all of it is pre-existing and unrelated to this remediation (`app/_components/DateCalendar.tsx`, `app/_components/Sheet.tsx`, `app/page.tsx`, one pre-existing unescaped-apostrophe in `app/design/results-card-variations/page.tsx`, and two unused-var warnings in `scripts/poc/*.mjs`). `proxy.ts` itself contributes zero lint issues. |
+| `next build` | Succeeds; output now additionally reports `ƒ Proxy (Middleware)` |
+| `/design/*` in production | All routes return `404` with a `0`-byte body — confirmed empirically, not assumed |
+| `hello@getdropin.ca` / `feedback@getdropin.ca` | Unchanged — `lib/dropin/contact.ts` was not touched |
+| Unrelated product behavior | `/` and `/api/sessions` verified byte-identical in behavior (`200`, same content) before and after |
+
+---
+
 ## Required Closing Answers
 
-**A. Overall security status:** No secrets, credentials, or personal-computer file exposure exist anywhere in the codebase or its build output. Geolocation handling is provably privacy-preserving. The architecture is sound. Two P1 issues exist and must be resolved before public launch — neither involves a secret or user-data leak, but both are real, verified exposures of internal-only content (design mockups; one internal email address) that this audit's own primary goal explicitly asked to check for.
+**A. Overall security status:** No secrets, credentials, or personal-computer file exposure exist anywhere in the codebase or its build output. Geolocation handling is provably privacy-preserving. The architecture is sound. Both P1 issues identified by the original audit have been remediated and empirically verified (§14) — see below for the one remaining non-blocking item (historical git exposure of the private address, already public, cleanup deferred to the user's explicit decision).
 
 **B. P0 blockers:** None.
 
-**C. P1 pre-launch fixes:** (1) `app/design/*` route tree must be excluded from the production build or otherwise gated — see §13 for options. (2) Confirm GitHub repo visibility and redact the private inbox address in `docs/LAUNCH_READINESS_1B_TRUST_PRIVACY_FEEDBACK_IMPLEMENTATION.md:92` regardless of the outcome.
+**C. P1 pre-launch fixes:** **Both resolved, per §14.** (1) `app/design/*` is now blocked in production via `proxy.ts` — verified `404`/`0`-byte responses for all seven routes against an actual production build. (2) The private inbox address was redacted from both doc files that named it. The address still exists in two historical git commits on the confirmed-public GitHub repository — this is now a documented, conscious decision point (optional history rewrite) rather than an unresolved P1, since it cannot be fixed by any working-tree edit and this audit is not authorized to rewrite history automatically.
 
 **D. P2/P3 recommendations:** See §13 in full — five items, none blocking, all documented with rationale.
 
@@ -227,7 +273,7 @@ None of these three log lines include user data, coordinates, personal informati
 
 **G. Geolocation privacy status:** Clean, freshly re-verified independent of prior audits. Coordinates are provably confined to browser memory — never stored, never logged, never transmitted, never reflected into a URL or Share payload. Current Privacy copy remains technically accurate.
 
-**H. API/server exposure status:** One API route exists (`/api/sessions`), takes zero input, has no path-traversal surface, and has a working (if not independently stress-tested) failure-isolation mechanism. The real server-surface finding is the accidental `app/design/*` route tree becoming production-reachable (P1, item C.1).
+**H. API/server exposure status:** One API route exists (`/api/sessions`), takes zero input, has no path-traversal surface, and has a working (if not independently stress-tested) failure-isolation mechanism. The `app/design/*` route tree is now blocked from production via `proxy.ts` (§14) — verified empty-body `404` responses for every design route against a real production build.
 
 **I. Production build status:** Build succeeds cleanly. No secrets, no local paths, no raw/private files in client-facing output. No source maps ship to the client. The one local-path artifact is server-internal and non-exposed.
 
@@ -237,6 +283,12 @@ None of these three log lines include user data, coordinates, personal informati
 
 **L. Hosting requirements:** Node.js server runtime required (not static-export-compatible); persistent shared filesystem required for snapshot data; zero environment variables required today; standard `next build`/`next start` commands; cron/scheduled-job capability needed for the daily refresh; HTTPS/custom-domain support depends entirely on the host chosen next. Full detail in §10.
 
-**M. Exact files changed during this audit:** **One file created** — `docs/SECURITY_DEPLOYMENT_AUDIT.md` (this document). **No other files were modified.** No source code, configuration, or data files were changed. The one prior candidate fix considered (URL scheme validation, §6) was explicitly deferred and reported rather than applied, per this audit's fix policy.
+**M. Exact files changed, across the full audit + remediation:**
+- **Created:** `docs/SECURITY_DEPLOYMENT_AUDIT.md` (this document), `proxy.ts` (the production `/design` block).
+- **Modified:** `docs/LAUNCH_READINESS_1B_TRUST_PRIVACY_FEEDBACK_IMPLEMENTATION.md` (redacted the private address at line 92).
+- **Created then removed during iteration:** `app/design/layout.tsx` — the first `notFound()`-based attempt at P1-1, discarded once verification showed it leaked page content via the RSC hydration payload (§14). It does not exist in the final state.
+- **Not modified:** all other application code, including `lib/dropin/contact.ts` (public addresses untouched), every file under `app/design/*` (design source preserved as-is), and every file flagged as a P2/P3 recommendation (§13) — none of those were touched, per the instruction to resolve only the two P1s.
 
-**N. Recommended next action:** Because P1 issues exist, **this audit does not clear the project for hosting/scheduler planning yet.** Per the audit's own instructions, work stops here: resolve C.1 (exclude or gate `/design`) and C.2 (confirm repo visibility, redact the inbox address), then re-run a focused re-check of just those two items before proceeding to hosting selection, scheduler implementation, domain connection, or any deployment step.
+**N. Recommended next action:** Both P0/P1 launch blockers identified by this audit are now resolved and empirically verified. One optional, non-blocking decision remains for the user: whether to rewrite git history to fully scrub the private address from the two historical commits on the now-confirmed-public repository (§14) — low severity (contact info, not a credential) and explicitly not performed here, since it requires a deliberate force-push decision outside this audit's scope.
+
+**Security & Deployment Audit passed for proceeding to hosting/scheduler planning.**

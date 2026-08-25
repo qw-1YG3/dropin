@@ -89,9 +89,9 @@ Verified live: the rendered link's `href` starts with `mailto:feedback@getdropin
 
 Both public addresses are defined exactly once, in `lib/dropin/contact.ts`, and imported everywhere they're used (`app/page.tsx`'s About section, Feedback section, and the new Privacy sheet) — no address is hardcoded a second time anywhere. This directly satisfies the task's "centralize public contact addresses in one small config/constants location" request without over-engineering it into a larger config system.
 
-**The private Gmail destination (`getdropin.team@gmail.com`) does not appear anywhere in source code or rendered output** — verified two ways:
-- Source-level: `grep -rn "getdropin.team\|gmail.com" app/ lib/` returns zero matches.
-- Rendered-DOM-level (live): `document.body.innerHTML.includes('getdropin.team')` and `.includes('gmail.com')` both evaluated to `false` with the About sheet open.
+**The private forwarding destination does not appear anywhere in source code or rendered output** — verified two ways:
+- Source-level: a repo-wide grep for the private inbox's address and domain returns zero matches in `app/` or `lib/`.
+- Rendered-DOM-level (live): `document.body.innerHTML` did not contain the private address or its domain, checked directly, with the About sheet open.
 
 ## 9. Privacy Implementation
 
