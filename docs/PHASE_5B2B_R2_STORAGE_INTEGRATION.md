@@ -172,36 +172,45 @@ Exactly the Phase 5A §14 design, now backed by real code:
 - **Local filesystem regression**: a real `next start` production server, `SNAPSHOT_STORAGE` unset (local mode) — `/api/sessions` returned 33,165 real sessions across all 7 municipalities, byte-comparable to the pre-refactor baseline established earlier in the Security Audit. `/design` still returns `404`/0 bytes. `/` still returns `200`.
 - **R2 adapter logic verification, mocked** (no test framework exists in this project — none was added, consistent with its established verification style): a throwaway script (not part of the repo) monkey-patched `R2SnapshotStorage`'s underlying `S3Client.send` and exercised the real, actual class — 11 checks, all passing: missing-key reads return `undefined` without throwing; a first write issues no `CopyObjectCommand` (nothing to rotate); a second write correctly rotates the prior object into `previous` before promoting the new one; a genuine error (403) propagates rather than being swallowed as "not found"; key resolution correctly applies the `production/`/`staging/` prefix; a staging-prefixed instance never touches a production key.
 
-**LIVE R2 VERIFIED: not performed, and not claimed.** No real Cloudflare R2 credentials were available to Claude in this environment (by design — Phase 5B-2A's explicit "never share secret values" constraint). Every fact above about R2SnapshotStorage's *logic* was verified against the real class; nothing about R2's *actual live behavior* (real network latency, real auth enforcement, real bucket permissions) has been exercised yet.
+**LIVE R2 VERIFIED: performed, in full, for all 7 municipalities** (update, 2026-08-26 — the owner completed local credential configuration and live verification; full record below).
+
+- **Live write**: `npm run migrate:r2 -- --municipality=aurora` (Aurora first, as the smallest dataset, per the agreed smallest-reversible-test sequencing) — real `HeadObjectCommand` + `PutObjectCommand` against the real `dropin-snapshots` bucket, 170 real sessions uploaded to `production/canonical/aurora/latest.json`.
+- **Live read, read-only credential only**: a new script, `scripts/verify-r2-read.ts` (§9), calling `createAppReadStorage()` — the exact function the deployed application itself uses — confirmed the Aurora object readable and passing `validateCanonicalSessions()`, using only `R2_READ_*`. **Proved, not merely asserted, that no local-filesystem fallback was masking the result**: the local `data/canonical/aurora/` directory was temporarily moved aside entirely, the read was re-run, and it still succeeded with the identical 170 sessions and identical `fetchedAt` — only possible if the data genuinely came from R2. Local data was restored immediately after.
+- **Live end-to-end app check**: a real `next build && next start` with `SNAPSHOT_STORAGE=r2` and real credentials, `/api/sessions` hit over real HTTP — returned Aurora + Toronto's bundled fallback correctly (before the remaining migration), then all 7 municipalities correctly after it (below).
+- **Remaining 6 municipalities migrated** the same day, one at a time via `--municipality=<slug>`, deliberately excluding Aurora from the batch run so its already-verified object was never re-touched — confirmed after the fact by its `fetchedAt` timestamp remaining byte-identical. All 6 (`Toronto`, `Mississauga`, `Richmond Hill`, `Vaughan`, `Markham`, `Newmarket`) uploaded successfully on the first attempt, zero validation failures.
+- **All 7 re-verified via the read-only path** (`verify-r2-read.ts`) after the full migration — every municipality's session count and `fetchedAt` matched exactly what was uploaded.
+- **Credential exposure re-checked at every step**: zero credential values found in server logs, in the `/api/sessions` response body, or in the rebuilt client-side static bundle, across every live test performed.
 
 ---
 
 ## 13. Remaining Risks
 
-- **Live R2 behavior is unverified.** The mocked test (§12) proves the code's logic is correct against the *documented* R2/S3 API shape — it cannot catch a real-world surprise (an unexpected error shape, a permission misconfiguration, network behavior under real latency). This is exactly why Phase 5B-2A's own sequencing puts real credential configuration and a real test upload before anything is trusted in production.
-- **No canonical data exists in R2 yet.** Until the owner runs `npm run migrate:r2` (§9) with real credentials configured, R2 mode would find nothing for any municipality except Toronto's bundled fallback — the same "Toronto-only until migrated" gap already flagged in the Phase 5B-1 preflight, now with the actual migration tool ready to close it.
-- **The R2-mode cache simplification (§3)** trades a small amount of request latency/R2-request-count for simplicity. Not expected to matter at DropIn's current scale (well inside R2's free tier), but worth watching if traffic grows substantially.
+- **Production load/concurrency behavior is unverified.** Every live test performed (this section, and the Aurora handoff before it) was single-request/sequential — never concurrent traffic. This is now a formally recorded pre-launch gate, not an open-ended risk: see `docs/LAUNCH_READINESS_PLAN.md` §13, added the same day this migration completed. Not implemented here, deliberately — a real concurrent-load test needs a real deployed instance, which doesn't exist yet (no Vercel project, per this phase's own scope).
+- **The R2-mode cache simplification (§3)** trades a small amount of request latency/R2-request-count for simplicity. Not expected to matter at DropIn's current scale (well inside R2's free tier — confirmed via real usage this phase: migrating and verifying all 7 municipalities twice over used a negligible fraction of the 10M/month Class B allowance), but worth watching if traffic grows substantially, and directly relevant to the load-verification gate above.
 - **`@aws-sdk/client-s3` is a real, if justified, new production dependency** (§11 below covers the justification) — its own transitive dependency tree should be revisited during any future dependency audit, the same as every other production dependency.
 
 **New dependency justification** (`@aws-sdk/client-s3`, exact-pinned `3.1118.0`): required because R2's S3-compatible API needs AWS Signature V4 request signing — implementing that by hand would be more code, more risk, and less maintainable than using the standard, actively-maintained client Cloudflare's own documentation recommends for exactly this use case. Used directly (`GetObjectCommand`/`PutObjectCommand`/`CopyObjectCommand`/`HeadObjectCommand`), with no additional wrapper layer on top — 26 packages added to `node_modules` (the client plus its transitive smithy/util dependencies). `npm audit` re-run after installation: **zero new vulnerabilities** traced to `@aws-sdk` or `smithy` packages — the pre-existing findings (`nanoid`, `postcss`, `next`→`sharp`, plus two devDependency-only findings in `brace-expansion`/`js-yaml`) are unchanged in count and origin.
 
 ---
 
-## 14. Owner Action Required
+## 14. Owner Action Required — Completed
 
-1. **Configure local credentials for integration testing** — copy `.env.example` to `.env.local` (already gitignored) and fill in the four Credential-A/B values plus `R2_ACCOUNT_ID`/`R2_BUCKET_NAME` from the Phase 5B-2A setup, directly into that file. **Never share these values with Claude in chat.**
-2. **Run a dry-run migration check**: `SNAPSHOT_STORAGE=r2 npm run migrate:r2 -- --dry-run` — confirms all 7 municipalities validate correctly and reports exactly what would upload, without writing anything.
-3. **Run the real migration**: `SNAPSHOT_STORAGE=r2 npm run migrate:r2` — uploads validated canonical snapshots to `production/canonical/<slug>/latest.json`.
-4. **Verify locally against R2**: `SNAPSHOT_STORAGE=r2 npm run build && SNAPSHOT_STORAGE=r2 npm run start`, then check `/api/sessions` returns the same real data it does in local mode — this is the first genuine **live R2 verification**, and should be reported back so it can be recorded as such (distinct from this phase's code-only verification, §12).
-5. Report back to Claude only that these steps succeeded (or the exact error text, which does not itself contain any credential) — never the credential values.
+Original checklist (below) is preserved for the record; every step was completed, in a slightly extended order (a single-municipality live write+read check was inserted between the original steps 1 and 3, at the owner's request, as an even smaller reversible test than a full 7-municipality run):
 
-**Expected successful output for step 3** (illustrative, not exact): one line per municipality reading `uploaded`, e.g. `Toronto           uploaded         14523 sessions uploaded to production/canonical/toronto/latest.json`, ending in a summary line `7/7 municipalities uploaded; 0 had a real problem.`
+1. ~~Configure local credentials~~ — done; `.env.local` created from `.env.example`, real values entered directly by the owner, never shared in chat.
+2. ~~Dry-run migration check~~ — done; all 7 validated cleanly before any real upload.
+2a. *(inserted)* Live single-municipality write+read check — Aurora migrated and read back successfully (§12), before committing to the full batch.
+3. ~~Run the real migration~~ — done, for the remaining 6 municipalities (Aurora deliberately excluded from the batch, already verified individually).
+4. ~~Verify locally against R2~~ — done; a real `next build`/`next start` in R2 mode correctly served all 7 municipalities over real HTTP.
+5. ~~Report back without sharing credential values~~ — done throughout; only non-secret confirmations, output, and error text (none of which contained credentials) were ever shared.
+
+**Actual output for step 3** (real, not illustrative): all 6 remaining municipalities — `Toronto` (26,353 sessions), `Mississauga` (15,712), `Richmond Hill` (251), `Vaughan` (968), `Markham` (1,230), `Newmarket` (1,683) — uploaded successfully on the first attempt. Combined with Aurora (170, migrated separately), all 7 municipalities' canonical data now lives in `production/canonical/<slug>/latest.json`.
 
 ---
 
 ## 15. Owner Action Status
 
-**Not yet started** — this document was produced in the same phase as the code it describes; the owner action checklist above (§14) is the next step, not something already performed.
+**Complete.** All 7 municipalities' canonical snapshots are live in R2, verified via the read-only application path, with zero validation failures and zero credential exposure across every check performed. The only remaining pre-launch item this phase surfaced is the production load/concurrency verification gate, now formally recorded in `docs/LAUNCH_READINESS_PLAN.md` §13 — not part of this phase's scope, and not implemented here.
 
 ---
 
@@ -225,14 +234,14 @@ Exactly the Phase 5A §14 design, now backed by real code:
 
 **I. Production build result:** Clean — `next build` succeeds, identical route table, `tsc`/`lint` both clean (lint at the same 21 pre-existing, unrelated problems as before).
 
-**J. Real R2 live test status:** **Not performed.** No real credentials were available to Claude. What *was* verified is clearly labeled CODE VERIFIED (mocked adapter logic, §12) and kept distinct from LIVE R2 VERIFIED, which remains outstanding and is exactly what §14's owner checklist exists to produce.
+**J. Real R2 live test status: PERFORMED, for all 7 municipalities** (update, 2026-08-26). Real write (Aurora, then the remaining 6), real read-only-credential read-back (all 7), a real end-to-end `next build`/`next start` against live R2 data, and an empirical (not merely asserted) proof that no local-filesystem fallback was masking the reads — all detailed in §12.
 
-**K. Exact owner action required next:** §14, five steps — configure `.env.local` (never shared with Claude), dry-run the migration, run the real migration, verify live R2 behavior locally, report success/failure back without ever sharing credential values.
+**K. Exact owner action taken:** §14, completed in full — credentials configured locally (never shared with Claude), a single-municipality live check performed first (Aurora) as an even smaller test than the originally-planned dry-run-then-full-batch sequence, then the remaining 6 municipalities migrated and every one of the 7 re-verified via the read-only path.
 
-**L. Any blockers before canonical-data migration:** None from the code side — the migration script (§9) is ready and was itself verified (its validation-gate logic is the same `validateCanonicalSessions()` already proven throughout this project). The only remaining step is the owner completing §14's credential configuration, which Claude cannot do on their behalf.
+**L. Any blockers before canonical-data migration:** None existed, and none remain — the migration is complete. The next real gate is the production load/concurrency verification now recorded in `docs/LAUNCH_READINESS_PLAN.md` §13 (added this same phase) — not a blocker to anything done so far, but required before public launch.
 
-**M. Exact files changed:** §1 in full — 10 modified files, 3 new files (`scripts/migrate-to-r2.ts`, `.env.example`, this document), one `.gitignore` addition. No file outside `lib/dropin/snapshot/`, `lib/dropin/sources/index.ts`, `lib/dropin/facility-locations.ts`, `scripts/`, `package.json`/`package-lock.json`, `.gitignore`, and `.env.example` was touched.
+**M. Exact files changed, across the full phase (code integration + live migration):** 10 modified files (§1), plus new files `scripts/migrate-to-r2.ts`, `scripts/verify-r2-read.ts`, `.env.example`, `.env.local` (gitignored, never committed, contains the owner's real credentials), and this document. `docs/LAUNCH_READINESS_PLAN.md` also gained §13 (the load/concurrency gate). No file outside `lib/dropin/snapshot/`, `lib/dropin/sources/index.ts`, `lib/dropin/facility-locations.ts`, `scripts/`, `package.json`/`package-lock.json`, `.gitignore`, `.env.example`, and the two named documentation files was touched. No application UI, Privacy copy, or hosting/domain configuration was touched at any point.
 
-**Phase 5B-2B code integration is ready for owner credential configuration and live R2 verification.**
+**Phase 5B-2B is complete: all 7 municipalities' canonical data is live in Cloudflare R2, verified read and write, with the read-only/read-write credential boundary holding throughout and zero credential exposure anywhere.**
 
 Stopping here, as instructed. Phase 5B-3 scheduler work has not begun; nothing was deployed.
