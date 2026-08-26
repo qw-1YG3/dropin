@@ -1,0 +1,94 @@
+name: Daily Production Data Refresh
+
+# Refreshes DropIn's 7 currently-supported municipalities' canonical R2
+# snapshots once per day (Phase 5B-3). Uses only the R2 "Refresh Read &
+# Write" credential — never the "Production Read Only" one (that
+# credential belongs to the deployed application, not this workflow).
+# See docs/PHASE_5B3_DAILY_REFRESH_SCHEDULER.md for the full architecture,
+# cadence reasoning, required repository secrets, and failure behavior.
+#
+# This workflow does not change what gets fetched, normalized, or
+# validated — it only runs the existing, already-verified
+# `npm run refresh:data -- --all --json` CLI on a schedule. All safety
+# behavior (validation gate, count-collapse protection, atomic
+# latest/previous promotion, per-municipality failure isolation) already
+# exists in that CLI and is unchanged by this workflow.
+
+on:
+  schedule:
+    # 13:00 UTC daily = 9:00am ET (EDT, in effect through this project's
+    # active season). Toronto's own CKAN source updates once daily around
+    # 8am ET (Phase 3.0 finding, carried forward unchanged through Phase
+    # 3.3B/5A's cadence reasoning) — this runs after that update has had
+    # time to complete, while still refreshing early enough in the day to
+    # be fresh for most users.
+    - cron: "0 13 * * *"
+  # Manual trigger — for testing this workflow itself, and for on-demand
+  # recovery if a scheduled run is ever missed or needs re-running.
+  workflow_dispatch: {}
+
+# Ensures a slow or stuck run can never overlap with the next scheduled
+# trigger — queues rather than cancels, so a run already in progress
+# always completes cleanly (Phase 5B-1 §5's own recommendation).
+concurrency:
+  group: production-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    # Generous relative to the ~11–15s baseline measured for 3 sources in
+    # Phase 3.3B, scaled to today's 7; real headroom, not a tight bound.
+    timeout-minutes: 30
+    env:
+      SNAPSHOT_STORAGE: r2
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      # Refresh Read & Write credential ONLY — this workflow must never
+      # reference R2_READ_ACCESS_KEY_ID / R2_READ_SECRET_ACCESS_KEY at all
+      # (those belong solely to the deployed application's own read path).
+      R2_WRITE_ACCESS_KEY_ID: ${{ secrets.R2_WRITE_ACCESS_KEY_ID }}
+      R2_WRITE_SECRET_ACCESS_KEY: ${{ secrets.R2_WRITE_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Deliberately plain `npm ci` (not --omit=dev) — tsx, required to
+      # run these TypeScript scripts directly, is a devDependency.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run daily refresh (all 7 municipalities)
+        id: refresh
+        run: |
+          set +e
+          npm run refresh:data -- --all --json > refresh-output.json
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          set -e
+          cat refresh-output.json
+
+      # Runs regardless of pass/fail, so a failed run's per-municipality
+      # detail is just as visible as a successful one (Part 8: never let
+      # a partial failure look like an undifferentiated success).
+      - name: Write run summary
+        if: always()
+        run: npx tsx scripts/refresh/format-summary.ts < refresh-output.json >> "$GITHUB_STEP_SUMMARY"
+
+      # The refresh CLI itself already exits non-zero if any municipality
+      # failed to activate a new snapshot (scripts/refresh/index.ts,
+      # unchanged by this workflow) — this step turns that into a failed
+      # GitHub Actions run, which is what triggers the platform's own
+      # built-in failure-email notification (Phase 5A §6). A failed
+      # municipality's previous known-good snapshot was already left
+      # untouched by the CLI itself; this step only makes the failure
+      # visible, it does not change what already happened.
+      - name: Fail the job if any municipality failed to refresh
+        if: steps.refresh.outputs.exit_code != '0'
+        run: |
+          echo "One or more municipalities failed to refresh — see the summary above. Each failed municipality's previous known-good snapshot was left untouched in R2."
+          exit 1
