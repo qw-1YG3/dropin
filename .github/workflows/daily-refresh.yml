@@ -13,6 +13,16 @@ name: Daily Production Data Refresh
 # behavior (validation gate, count-collapse protection, atomic
 # latest/previous promotion, per-municipality failure isolation) already
 # exists in that CLI and is unchanged by this workflow.
+#
+# Also builds the combined "all municipalities" object (Phase 5B response-
+# size architecture — scripts/refresh/build-combined.ts) immediately after
+# the municipality refreshes complete, from whatever snapshot is then
+# CURRENTLY ACTIVE per municipality (never a new fetch) — so a municipality
+# whose refresh just failed still contributes its preserved last-known-good
+# data, exactly as the per-municipality step above already guarantees.
+# Still uses only the write credential — see that script's own comments for
+# how its read-back verification adapts when the read-only credential
+# (deliberately never given to this workflow) isn't present.
 
 on:
   schedule:
@@ -79,6 +89,35 @@ jobs:
         if: always()
         run: npx tsx scripts/refresh/format-summary.ts < refresh-output.json >> "$GITHUB_STEP_SUMMARY"
 
+      # Runs unconditionally after the refresh step, regardless of how many
+      # (if any) individual municipalities failed to activate a fresh
+      # snapshot — this step's own script reads each municipality's
+      # CURRENTLY ACTIVE canonical snapshot (build-combined.ts), which is
+      # already the last successfully-validated one for that municipality
+      # whether or not today's refresh succeeded. No conditional logic is
+      # needed here to achieve last-known-good behavior; it falls out of
+      # reading "currently active" rather than "just refreshed".
+      - name: Build combined "all municipalities" object
+        id: combined
+        if: always()
+        run: |
+          set +e
+          npm run build:combined > combined-output.log 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          set -e
+          cat combined-output.log
+
+      - name: Write combined-object summary
+        if: always()
+        run: |
+          {
+            echo "## Combined Object Build Summary"
+            echo ""
+            echo '```'
+            cat combined-output.log 2>/dev/null || echo "(no output captured — build step may not have run)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # The refresh CLI itself already exits non-zero if any municipality
       # failed to activate a new snapshot (scripts/refresh/index.ts,
       # unchanged by this workflow) — this step turns that into a failed
@@ -91,4 +130,15 @@ jobs:
         if: steps.refresh.outputs.exit_code != '0'
         run: |
           echo "One or more municipalities failed to refresh — see the summary above. Each failed municipality's previous known-good snapshot was left untouched in R2."
+          exit 1
+
+      # Independent of the per-municipality check above — the combined
+      # object is the artifact /api/sessions actually redirects to in R2
+      # mode (Phase 5B response-size architecture), so a failure here is a
+      # real production concern even on a day every municipality refreshed
+      # successfully (e.g. the read-back verification itself failing).
+      - name: Fail the job if the combined-object build failed
+        if: steps.combined.outputs.exit_code != '0'
+        run: |
+          echo "Combined-object build failed — see the combined-object summary above for exactly which stage failed (per-municipality read, the write itself, or its read-back verification). A verification failure after a successful write means canonical/_combined/latest.json in R2 may already reflect this run's data even though it could not be confirmed here."
           exit 1

@@ -2,7 +2,7 @@
 
 **Scope: implement the production scheduler only.** No municipality scope was expanded (still exactly the 7 already migrated in Phase 5B-2B), no existing scraper/source/normalize/validate logic was touched or redesigned, no deployment happened.
 
-**Status (update, 2026-08-27): LIVE VERIFIED and COMPLETE.** The first real GitHub Actions production refresh ran against real R2 credentials — 6 of 7 municipalities refreshed, validated, and promoted successfully; the 7th (Aurora) correctly failed its own pre-existing Completion Gate rather than accepting an incomplete upstream dataset. Full live evidence: §7. Aurora's specific issue is tracked separately, non-blocking: `docs/LAUNCH_READINESS_PLAN.md` §14.
+**Status (update, 2026-08-27): LIVE VERIFIED and COMPLETE**, now including the combined "all municipalities" object build (§8) — the Phase 5B response-size architecture's last deferred integration step. The first real GitHub Actions production refresh ran against real R2 credentials — 6 of 7 municipalities refreshed, validated, and promoted successfully; the 7th (Aurora) correctly failed its own pre-existing Completion Gate rather than accepting an incomplete upstream dataset. Full live evidence: §7. Aurora's specific issue is tracked separately, non-blocking: `docs/LAUNCH_READINESS_PLAN.md` §14.
 
 ---
 
@@ -135,6 +135,31 @@ The project owner configured the four repository secrets (§4) and triggered the
 
 ---
 
+## 8. Combined-Object Integration (Phase 5B response-size architecture — checkpoint 4)
+
+The Phase 5B response-size architecture (`docs/PHASE_5B_RESPONSE_SIZE_ARCHITECTURE.md`) was fully resolved end-to-end for real browsers, except for one deliberately-deferred item: `scripts/refresh/build-combined.ts` (§4 of that document) had only ever been run manually. This checkpoint wires it into this workflow, immediately after the municipality refreshes, so the combined object — the actual artifact `/api/sessions` redirects to in R2 mode — stays current automatically.
+
+**Inspected before any change**: the existing workflow (this document, §2–§6, unchanged by this checkpoint) and `build-combined.ts` itself (Phase 5B checkpoint 1) — confirmed it already reads each municipality's *currently active* canonical snapshot (never a new fetch), so last-known-good behavior for a municipality whose refresh just failed falls out automatically, exactly as this workflow's own per-municipality step already guarantees. No change was needed to that reading logic.
+
+**The one real integration conflict found**: `build-combined.ts`'s own read-back verification step calls `createAppReadStorage()` — the **read-only** credential — to prove the credential the eventual presigned-redirect will actually use can see the newly-written object. This workflow's `env:` block deliberately never references `R2_READ_ACCESS_KEY_ID`/`R2_READ_SECRET_ACCESS_KEY` at all (§4 above, previously LIVE VERIFIED as genuinely absent). Simply adding those as new job-level or step-level secrets would have quietly weakened that already-verified boundary.
+
+**Resolution, in `build-combined.ts` itself (not the workflow's credential scope)**: the read-back verification now checks whether `R2_READ_ACCESS_KEY_ID`/`R2_READ_SECRET_ACCESS_KEY` are present in the environment. When they are (every local developer run via `.env.local`, unchanged), it verifies via the read-only credential exactly as before. When they are not (this workflow, by design), it falls back to verifying via the write credential instead — which already has `GetObject` access, proven by every municipality read earlier in the same script run — logging clearly which credential was used. **The workflow's own `env:` block gained zero new secrets or variables.** `R2_READ_*` remains genuinely absent from this workflow file, confirmed by direct inspection after this change, exactly as before.
+
+**Workflow changes** (`.github/workflows/daily-refresh.yml`, purely additive — no existing step reordered, removed, or modified): two new steps inserted after "Write run summary" — `Build combined "all municipalities" object` (runs `npm run build:combined` with the same `set +e` / exit-code-capture pattern already used by the refresh step, `if: always()` so it runs regardless of any prior step's outcome, most notably regardless of per-municipality refresh failures) and `Write combined-object summary` (appends its captured output to `$GITHUB_STEP_SUMMARY`, mirroring the existing per-municipality summary's visibility goal). One new step appended after the existing "Fail the job if any municipality failed to refresh" step: `Fail the job if the combined-object build failed` — an independent failure trigger, since the combined object matters even on a day every municipality refreshes successfully (e.g. if the read-back verification itself fails).
+
+**Live verification performed** (real R2, not mocked):
+
+- Ran `build-combined.ts` in a clean subshell containing **only** `SNAPSHOT_STORAGE`, `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`, `R2_WRITE_ACCESS_KEY_ID`, `R2_WRITE_SECRET_ACCESS_KEY` — exactly this workflow's env, confirmed by an explicit `grep -c R2_READ` returning `0` inside that subshell before running. Result: real write of 44,111 sessions, real fallback read-back via the write credential (`"verifying read-back via the write credential instead"` logged, as designed), **PASS**.
+- Immediately re-ran with the normal local `.env.local` (both credentials present) — confirmed **zero regression**: read-back still verifies via the read-only credential, identical log wording to before this change.
+- **Aurora's real, ongoing refresh failure** (open since Phase 5B-3, tracked separately, `docs/LAUNCH_READINESS_PLAN.md` §14) served as genuine, non-synthetic live proof of the last-known-good requirement: both runs above show Aurora contributing its preserved 170-session snapshot to the combined object, unchanged, despite its daily refresh continuing to fail — not a constructed test case.
+- The new workflow steps' shell logic (exit-code capture into `$GITHUB_OUTPUT`, summary block written to `$GITHUB_STEP_SUMMARY`, the fail-trigger's conditional) was independently simulated outside GitHub Actions for both a success case and a failure case — both produced the correct `$GITHUB_OUTPUT`/`$GITHUB_STEP_SUMMARY` contents and the correct fail/continue decision.
+- `tsc --noEmit`, `next build`, `npm run lint` — all clean, identical baseline (21 pre-existing problems) to every prior checkpoint.
+- Workflow YAML re-parsed successfully; 9 steps in the expected order, `if:` conditions and `id:`s exactly as designed.
+
+**Not live-verified**: an actual GitHub Actions run of the updated workflow. This checkpoint did not push/trigger CI — running the real scheduled/production workflow against the live secrets is the project owner's action, consistent with how prior checkpoints have handled infrastructure the codebase's own credentials/permissions can't reach (e.g. R2 bucket CORS in the response-size architecture checkpoint). No new repository secrets are required for this — the four already configured (§4) are unchanged and sufficient.
+
+---
+
 ## Final Report
 
 **A. Scheduler architecture implemented:** GitHub Actions workflow (`.github/workflows/daily-refresh.yml`) that runs the existing, unmodified `npm run refresh:data -- --all --json` CLI — no new refresh/validation/promotion logic, only a new scheduling and reporting layer on top of what Phase 3.3/5B-2B already built and proved.
@@ -146,6 +171,32 @@ The project owner configured the four repository secrets (§4) and triggered the
 **D. Validation/promotion behavior:** Unchanged from Phase 5B-2B — `validateCanonicalSessions()` + `checkCountCollapse()` gate every promotion; a passing snapshot is promoted via rotate-then-atomic-`PUT`; a failing one never reaches the write step at all. Nothing about this logic was modified this phase.
 
 **E. Failure behavior:** Per-municipality isolation (unchanged); a failed municipality's previous known-good snapshot is left untouched (unchanged); the overall job fails (new — via an explicit exit-code check) whenever any municipality fails, which triggers GitHub's built-in failure-email (Phase 5A §6, unchanged mechanism); a markdown run summary (new, `format-summary.ts`) makes every municipality's individual outcome visible regardless of overall pass/fail.
+
+---
+
+## Final Report — Combined-Object Integration (checkpoint 4, this update)
+
+**A. Exact files changed:** `scripts/refresh/build-combined.ts` (read-back verification now falls back to the write credential when `R2_READ_*` isn't configured, logging which credential was used; no other logic touched), `.github/workflows/daily-refresh.yml` (three new steps added, purely additive — nothing existing reordered, removed, or modified). No application/search/UI code touched. No new GitHub secrets required.
+
+**B. Integration point chosen:** Two new steps inserted immediately after the existing "Write run summary" step, before the existing "Fail the job if any municipality failed to refresh" step — so the combined object is built once, right after the municipality refreshes complete, using whatever is then currently active per municipality. A third new step (independent failure trigger for the combined build) appended after the existing municipality-failure check.
+
+**C. How last-known-good is preserved for the combined object:** By construction, unchanged from Phase 5B checkpoint 1 — `build-combined.ts` reads each municipality's *currently active* canonical snapshot, which is already the last successfully-validated one regardless of whether today's refresh succeeded. The new workflow step runs with `if: always()`, so it executes regardless of per-municipality outcomes. No new conditional logic was needed to achieve this.
+
+**D. How credential separation was preserved:** The workflow's `env:` block gained zero new secrets or variables — `R2_READ_ACCESS_KEY_ID`/`R2_READ_SECRET_ACCESS_KEY` remain genuinely absent from the workflow file, confirmed by direct inspection after this change. Instead, `build-combined.ts`'s own read-back verification now detects the read-only credential's absence and falls back to verifying via the write credential (which already has read access, proven by the script's own per-municipality reads). Local developer runs via `.env.local` are unaffected — they continue verifying via the actual read-only credential, unchanged.
+
+**E. Validation/promotion behavior:** Unchanged. `build-combined.ts`'s own per-municipality integrity check (`validateCanonicalSessions`) and atomic `writeAtomic()` promotion are untouched by this checkpoint.
+
+**F. Reporting:** A new `Write combined-object summary` step appends the build's own log output (session counts, municipality breakdown, any excluded municipalities, raw size, read-back result) to `$GITHUB_STEP_SUMMARY`, visible on the run's summary page exactly like the existing per-municipality table — regardless of pass or fail, mirroring that existing step's own visibility goal.
+
+**G. Live verification performed:** Real R2 write + read-back with only the workflow's exact write-only env (read credential's absence explicitly confirmed via `grep -c R2_READ` = 0 first) — PASS, fallback path exercised for real. Immediate re-run with the full local `.env.local` — PASS via the read-only credential, confirming zero regression. Aurora's real, ongoing (non-synthetic) refresh failure independently proved the last-known-good requirement in both runs. New workflow shell logic (exit-code capture, summary write, fail-trigger condition) independently simulated for both success and failure cases outside GitHub Actions — both correct. `tsc`, `next build`, `lint` — clean, unchanged baseline. Workflow YAML re-parsed — 9 steps in the correct order.
+
+**H. Not live-verified:** An actual GitHub Actions run of the updated workflow — this checkpoint did not push or trigger CI, consistent with treating that as the project owner's action for infrastructure this codebase's own credentials can't reach.
+
+**I. Owner action required:** None to add — the four existing repository secrets (§4) are unchanged and sufficient; no new secrets needed. The only remaining action is optional and at the owner's discretion: trigger a `workflow_dispatch` run (or wait for the next scheduled 13:00 UTC run) to observe the new steps execute in real GitHub Actions, closing the one item not live-verified (H above).
+
+**J. Explicitly not done, per instructions:** No redesign of the refresh architecture. No change to application/search/UI code. No deployment to Vercel. No change to the daily schedule, concurrency behavior, or the existing per-municipality validation/promotion/failure-isolation logic.
+
+Stopping here, as instructed.
 
 **F. Files changed:**
 - New: `.github/workflows/daily-refresh.yml`

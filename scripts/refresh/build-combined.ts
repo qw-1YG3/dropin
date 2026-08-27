@@ -136,19 +136,36 @@ async function main() {
   await writeStorage.writeAtomic(combinedLatestPath(), combinedPreviousPath(), combined);
   console.log(`[build-combined] wrote ${sessions.length} sessions to ${combinedLatestPath()} (write credential).`);
 
-  // Read back through the READ-ONLY credential specifically — proves not
-  // just "the write succeeded" but that the credential the eventual
-  // presigned-redirect will actually use can see this object, under the
-  // same production prefix both credentials already share.
-  const verifyStorage = createAppReadStorage();
+  // Prefer reading back through the READ-ONLY credential specifically —
+  // proves not just "the write succeeded" but that the credential the
+  // eventual presigned-redirect will actually use can see this object,
+  // under the same production prefix both credentials already share.
+  //
+  // R2_READ_* is deliberately absent from the daily refresh workflow's
+  // environment (docs/PHASE_5B3_DAILY_REFRESH_SCHEDULER.md §4 — that
+  // credential belongs solely to the deployed application's own read path,
+  // never to this refresh pipeline). Rather than adding it there and
+  // weakening that already-live-verified separation, this falls back to
+  // verifying the read-back through the write credential (which already
+  // has GetObject access, as proven by every municipality read earlier in
+  // this same script) whenever the read-only credential isn't configured.
+  // Still a real network round-trip proving the write is durable and
+  // readable — just not proof of the specific read-only credential's
+  // access, which local runs (where .env.local has both) continue to
+  // provide unchanged.
+  const readOnlyCredentialAvailable = Boolean(process.env.R2_READ_ACCESS_KEY_ID && process.env.R2_READ_SECRET_ACCESS_KEY);
+  const verifyStorage = readOnlyCredentialAvailable ? createAppReadStorage() : writeStorage;
+  if (!readOnlyCredentialAvailable) {
+    console.warn("[build-combined] R2_READ_* not configured in this environment — verifying read-back via the write credential instead (expected when run from the daily refresh workflow).");
+  }
   const readBack = await verifyStorage.readJsonIfExists<CombinedSnapshot>(combinedLatestPath());
   if (!readBack) {
-    console.error("[build-combined] FAIL — could not read the object back via the read-only credential immediately after writing it.");
+    console.error(`[build-combined] FAIL — could not read the object back via the ${readOnlyCredentialAvailable ? "read-only" : "write"} credential immediately after writing it.`);
     process.exit(1);
   }
 
   const json = JSON.stringify(combined);
-  console.log(`[build-combined] read-back via read-only credential: PASS — ${readBack.sessions.length} sessions, generatedAt=${readBack.metadata.generatedAt}`);
+  console.log(`[build-combined] read-back via ${readOnlyCredentialAvailable ? "read-only" : "write"} credential: PASS — ${readBack.sessions.length} sessions, generatedAt=${readBack.metadata.generatedAt}`);
   console.log(`[build-combined] raw size: ${(json.length / 1_000_000).toFixed(2)} MB`);
   console.log(`[build-combined] municipality counts: ${JSON.stringify(municipalityCounts)}`);
   if (missingMunicipalities.length > 0) {

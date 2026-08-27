@@ -25,7 +25,7 @@ Evaluated against server-side filtering, municipality-scoped loading, a lightwei
 1. ✅ **Combined-object generation** (`scripts/refresh/build-combined.ts`) — LIVE VERIFIED (§4).
 2. ✅ **Presigned-URL generation + `/api/sessions` redirect** — LIVE VERIFIED (§5).
 3. ✅ **Client-side `hasEnded` filtering parity** (`app/page.tsx`) — implemented, parity-VERIFIED against real production data, and LIVE-VERIFIED end-to-end in a real browser (§6).
-4. ⬜ Wire combined-object generation into the automatic daily GitHub Actions refresh (`.github/workflows/daily-refresh.yml`) — not yet done; today it must be run manually. Still deliberately deferred, same reasoning as before.
+4. ✅ **Wired into the automatic daily GitHub Actions refresh** (`.github/workflows/daily-refresh.yml`) — no longer manual-only. Full implementation and live verification: `docs/PHASE_5B3_DAILY_REFRESH_SCHEDULER.md` §8.
 5. ✅ **R2 bucket CORS policy** — applied by the project owner (exact policy specified in §6, applied outside this codebase via the Cloudflare dashboard); re-verified live this checkpoint (§6).
 
 **The 4.5MB Vercel Function response-size limit is structurally bypassed** (§5) — `/api/sessions` no longer transfers the ~33MB payload through the Function's own response body under any circumstance. **Client-side filtering is implemented and parity-correct, and the full path has now been LIVE VERIFIED end-to-end in a real browser** (§6) — the overall user-facing blocker is resolved.
