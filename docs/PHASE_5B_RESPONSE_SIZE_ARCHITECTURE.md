@@ -1,6 +1,6 @@
 # Phase 5B — `/api/sessions` Response-Size Architecture
 
-**Status (update, 2026-08-27): combined-object layer LIVE VERIFIED; presigned-URL redirect LIVE VERIFIED; the 4.5MB Vercel Function limit is structurally bypassed. The overall user-facing blocker is still not resolved** — `app/page.tsx` has not been updated for the redirect's one real behavioral consequence (§6). This document records the decision, both implementation checkpoints, and what remains.
+**Status (update, 2026-08-27): combined-object layer LIVE VERIFIED; presigned-URL redirect LIVE VERIFIED; client-side read-time filtering implemented and parity-VERIFIED against real production data. The 4.5MB Vercel Function limit is structurally bypassed, but a *new* blocker was found by real end-to-end browser testing: the R2 bucket has no CORS policy, so no browser can actually read the redirected response yet.** This document records the decision, all three implementation checkpoints, and what remains.
 
 ---
 
@@ -23,11 +23,12 @@ Evaluated against server-side filtering, municipality-scoped loading, a lightwei
 ## 3. Implementation Sequence
 
 1. ✅ **Combined-object generation** (`scripts/refresh/build-combined.ts`) — LIVE VERIFIED (§4).
-2. ✅ **Presigned-URL generation + `/api/sessions` redirect** — LIVE VERIFIED (§5, this update).
-3. ⬜ Move `hasEnded`/day-label filtering client-side (currently server-side in `applyReadTimeView`, `lib/dropin/sources/index.ts`) — **not yet implemented; this is now the one remaining piece before the overall user-facing blocker can be called resolved.** The redirect target (the combined object) contains every session unfiltered — no already-ended-session exclusion, no fresh `day` label — because the server-side step that used to do this is bypassed entirely by the redirect. `app/page.tsx` has not been changed yet to compensate.
+2. ✅ **Presigned-URL generation + `/api/sessions` redirect** — LIVE VERIFIED (§5).
+3. ✅ **Client-side `hasEnded` filtering parity** (`app/page.tsx`) — implemented, parity-VERIFIED against real production data. **Real end-to-end browser verification found a separate, new blocker: R2 bucket CORS (§6).**
 4. ⬜ Wire combined-object generation into the automatic daily GitHub Actions refresh (`.github/workflows/daily-refresh.yml`) — not yet done; today it must be run manually. Still deliberately deferred, same reasoning as before.
+5. ⬜ **New, discovered this checkpoint**: configure a CORS policy on the R2 bucket permitting browser `GET` requests from the app's origin(s). Not started — bucket-level CORS configuration requires Cloudflare account/bucket-admin access this project's existing object read/write credentials do not have; the exact policy to apply is specified in §6.
 
-**The 4.5MB Vercel Function response-size limit is now structurally bypassed** (§5) — `/api/sessions` no longer transfers the ~33MB payload through the Function's own response body under any circumstance. **The overall user-facing blocker is not yet resolved** — step 3 is required first, since today's redirect target is not equivalent to what `app/page.tsx` currently expects to receive.
+**The 4.5MB Vercel Function response-size limit is structurally bypassed** (§5) — `/api/sessions` no longer transfers the ~33MB payload through the Function's own response body under any circumstance. **Client-side filtering is implemented and parity-correct** (§6). **The overall user-facing blocker is still not resolved end-to-end** — not because of the filtering logic, but because step 5 (CORS) blocks every real browser from reading the redirect target at all, in local R2-mode testing today and in any future Vercel deployment.
 
 ## 4. Combined-Object Generation — Implementation and Live Verification
 
@@ -65,6 +66,64 @@ Evaluated against server-side filtering, municipality-scoped loading, a lightwei
 - Client bundle re-checked after a fresh build: zero traces of the AWS SDK, the presigner package, or any credential/variable name.
 
 **On the Access Key ID appearing inside the presigned URL** — worth stating precisely rather than leaving ambiguous: AWS SigV4 presigned URLs necessarily include the Access Key ID (as `X-Amz-Credential`) as part of how the receiving server verifies the signature. This is standard, expected, and not a secret exposure — the Secret Access Key itself is never included anywhere in the URL, is not derivable from it, and the signature cannot be reused for a different object or after expiry (proven above). This is the same trade-off every presigned-URL-based system accepts by design, not something specific to or weaker in this implementation.
+
+## 6. Client-Side Read-Time Filtering — Implementation, Parity Verification, and a Blocking CORS Finding
+
+**File**: `app/page.tsx` only. No other file changed this checkpoint.
+
+**Server-side semantics identified** (from `lib/dropin/sources/index.ts`'s `applyReadTimeView`, read in full, not assumed): for each session, exclude it if `hasEnded(new Date(s.endDateTime), now)` — `lib/dropin/time.ts`'s `hasEnded(end, now) { return end.getTime() <= now.getTime(); }`, a **boundary-inclusive** exclusion (a session ending at exactly `now` is excluded). A `days`/rolling-window option exists in `applyReadTimeView` but `app/api/sessions/route.ts`'s local-mode call passes no options, so it's never exercised in production — not ported. The server also attaches a `legacyDay` label per session; confirmed (repeated grep, this and prior checkpoints) it has zero frontend consumers and is already one of the six fields `build-combined.ts` trims from the object — not ported, since replicating it would be pure dead code.
+
+**Client-side implementation**: the existing `fetch("/api/sessions")` `useEffect` now filters once, at fetch-resolution time, against a freshly-taken `now`, before the result ever reaches `sessions` state:
+
+```ts
+fetch("/api/sessions")
+  .then((res) => res.json())
+  .then((data: { sessions: Session[] }) => {
+    if (cancelled) return;
+    const now = new Date();
+    setSessions(data.sessions.filter((s) => !hasEnded(new Date(s.endDateTime), now)));
+    setLoading(false);
+  });
+```
+
+**Zero logic duplication**: reuses the exact shared `hasEnded` from `lib/dropin/time.ts` (pure, dependency-free, already safe for client code — no `fs`/env/network usage). No reimplementation of the exclusion rule anywhere.
+
+**A real subtlety this checkpoint had to get right**: `app/page.tsx` already had a `liveSessions` `useMemo` that re-filters by `computeStatus !== "ended"` every 30 seconds — but that memo is *not* what feeds search. `parseQuery(committedQuery, sessions)` reads the raw `sessions` state directly. Filtering only `liveSessions` and leaving `sessions` unfiltered would have left ended sessions fully searchable — wrong. Filtering `sessions` itself at fetch time (mirroring the server's original "filter once, at read time" semantic) fixes this with zero changes to `liveSessions` or any other existing consumer (`parseQuery`, `sessions.find`, `sessions.some` — all continue working unchanged, since they now simply receive pre-filtered data, exactly as before this phase).
+
+**Parity verification** (synthetic + real production data, comparing old server-logic replica vs. new client-logic replica at the same reference time): 7 synthetic boundary cases (ended 1 min before now, ended exactly now [boundary-inclusive], ends 1 min after now, yesterday, today, tomorrow, a midnight-adjacent case) — all matched. One AM/PM-titled session case confirmed zero interaction with Phase 3.6D's display-normalization logic. Full real-data comparison: **44,111 raw combined sessions → 37,670 post-filter on both sides**, exact ID-set match, zero sessions incorrectly retained, zero incorrectly removed. All checks passed on first run.
+
+**`tsc --noEmit`**: clean. **`npm run lint`**: 21 problems (16 errors, 5 warnings) — identical to the documented pre-existing baseline across every prior checkpoint this session; zero new regressions. **Client bundle** (`.next/static/`, fresh build): grepped for `R2_WRITE_ACCESS_KEY_ID`, `R2_WRITE_SECRET_ACCESS_KEY`, `R2_READ_SECRET_ACCESS_KEY`, any `AKIA*` pattern, and the literal read access-key-ID value — zero matches, as expected, since presigned-URL generation stays entirely server-side.
+
+**Real end-to-end browser test — blocked by a genuine infrastructure gap, not a code defect.** A local `next start` server in R2 mode, loaded in a real Chrome tab via `claude-in-chrome`:
+
+- Homepage loaded, UI shell rendered, placeholder-text rotation confirmed the page was hydrated/interactive.
+- The "Activities near you" section never left its loading-skeleton state. Console showed `TypeError: Failed to fetch` — the browser's signature for a CORS-blocked response, not an HTTP error status.
+- Direct reproduction: `curl -X OPTIONS` against the real presigned R2 URL with `Origin: http://localhost:3940` → `403 Forbidden`. Direct `curl GET` against the same URL with the same `Origin` header → `200 OK` but **no `Access-Control-Allow-Origin` header** in the response.
+- Root cause: **the R2 bucket has no CORS rule permitting browser requests from the app's origin.** `curl -L` (Checkpoint 2's verification method) never exercises this, because CORS is enforced only by browsers, on the *final* destination of a followed redirect — which is exactly the presigned R2 URL, a different origin than the app.
+- This is not a defect in the redirect or the filtering logic — both reconfirmed correct via fresh `curl` during this checkpoint. It's a missing bucket-level configuration, outside what the app's two existing object-scoped credentials (read-only, write-only) can change; bucket CORS is a Cloudflare account/bucket-admin setting.
+
+**Exact CORS policy needed** (Cloudflare R2 dashboard → bucket → Settings → CORS Policy, or equivalent API/Wrangler call — the project owner applies this, not this codebase):
+
+```json
+[
+  {
+    "AllowedOrigins": [
+      "http://localhost:3000",
+      "http://localhost:3940",
+      "https://getdropin.ca",
+      "https://www.getdropin.ca"
+    ],
+    "AllowedMethods": ["GET", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag", "Content-Length"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+`localhost` origins cover local dev/testing (`next dev` default port 3000, and the port used for this checkpoint's E2E test, 3940). `getdropin.ca`/`www.getdropin.ca` cover the eventual custom domain (Phase 5A/5B-preflight's own documented sequencing keeps this disconnected until later). **Not yet known**: the Vercel-assigned `*.vercel.app` URL, since no deployment has happened yet — add it to `AllowedOrigins` once a Vercel project exists, before relying on R2 mode there.
+
+Because of this blocker, checks 2–10 of the required end-to-end verification (search, forgiving search, municipality search, result-card rendering, detail modal, sort/filter, result-count parity in the live browser, the 30-second `liveNow` behavior) could not be exercised — none of them can run until a browser can successfully receive the R2 payload. This is being reported honestly as incomplete, not claimed as passing.
 
 ---
 
@@ -128,4 +187,38 @@ Evaluated against server-side filtering, municipality-scoped loading, a lightwei
 
 **N. Exact next implementation step:** Move `hasEnded`/day-label filtering into `app/page.tsx`, verified against the same data the current server-side `applyReadTimeView` produces, before the overall blocker can be considered resolved.
 
-Stopping here, as instructed.
+---
+
+## Final Report — Checkpoint 3 (Client-Side Read-Time Filtering Parity)
+
+**A. Exact files changed:** `app/page.tsx` only (added `hasEnded` to the existing `lib/dropin/time` import; the fetch `useEffect` now filters `data.sessions` by `!hasEnded(...)` before calling `setSessions`). No other file touched.
+
+**B. Exact server-side semantics identified:** `hasEnded(end, now) = end.getTime() <= now.getTime()` (boundary-inclusive — a session ending exactly at `now` is excluded). The `days`/rolling-window option exists but is never exercised in production (confirmed via `route.ts`'s no-options call to `getAllSessions`). The server-attached `legacyDay` label has zero frontend consumers and is already one of the six trimmed fields.
+
+**C. Client-side implementation:** §6 above — filters once, at fetch-resolution time, against a freshly-taken `now`, before populating `sessions` state.
+
+**D. Shared or duplicated, and why:** Shared. Reuses `lib/dropin/time.ts`'s exact `hasEnded` — already pure and client-safe. Zero reimplementation.
+
+**E. Parity test results:** 7 synthetic boundary cases + 1 AM/PM case, all matched. Real production data: 44,111 raw → 37,670 post-filter on both old-logic-replica and new-logic-replica, exact ID-set match, zero discrepancies either direction.
+
+**F. Boundary-case test results:** Ended 1 min before now, ended exactly now (boundary-inclusive, correctly excluded), ends 1 min after now (correctly retained), yesterday, today, tomorrow, a midnight-adjacent case — all correct on both sides.
+
+**G. Real end-to-end R2-mode result:** **Blocked, not passing.** Homepage loads and hydrates correctly, but the R2 bucket has no CORS policy permitting the browser to read the redirected response (`Failed to fetch` in console; confirmed via direct `curl` reproduction — `OPTIONS` preflight → `403`, actual `GET` → `200` but no `Access-Control-Allow-Origin` header). See §6 for full reproduction and the exact CORS policy needed to unblock this.
+
+**H. Raw vs. post-filter session counts:** 44,111 raw combined sessions → 37,670 post-filter (real production data, at the time of testing). Could not be independently re-measured inside the live browser due to G.
+
+**I. Client filtering performance:** Not measured in-browser — blocked by G. The synthetic/Node-side parity test's filter over 44,111 sessions was effectively instantaneous (sub-second); no reason to expect materially different behavior in-browser once G is resolved, but this is not being claimed as measured evidence.
+
+**J. 30-second `liveNow` behavior:** Not verified live — blocked by G. The existing `liveSessions` mechanism was not modified and is expected to continue working unchanged (§6), but "expected" is not "verified," per this project's own standard.
+
+**K. Search/filter/sort/detail regression result:** Not tested — blocked by G. None of checks 2–10 could be exercised.
+
+**L. Security/client-bundle result:** Clean. Fresh-build grep of `.next/static/` for write-credential values, read-secret value, any `AKIA*` pattern, and the literal read-access-key-ID value — zero matches.
+
+**M. Typecheck/build/lint result:** `tsc --noEmit` clean. `next build` succeeds. `lint`: 21 problems (16 errors, 5 warnings) — identical to the established baseline across every prior checkpoint. No new regressions.
+
+**N. Whether the overall 4.5MB production blocker can now be considered fully resolved:** **No.** The Function-response-size problem itself is solved (§5) and the client-side filtering logic is implemented and parity-correct (§6), but a *new*, real blocker — R2 bucket CORS — sits directly in its place. No browser, local or production, can complete this fetch path until it's configured.
+
+**O. Exact next step after this checkpoint:** Apply the CORS policy specified in §6 to the R2 bucket (project owner — requires Cloudflare account/bucket-admin access this codebase's credentials don't have). Once applied, re-run the real end-to-end browser test (checks 2–10) to close out Checkpoint 3 before considering the response-size architecture fully resolved end-to-end.
+
+Stopping here, as instructed. Not deploying to Vercel. Not changing hosting configuration.

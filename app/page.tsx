@@ -32,6 +32,7 @@ import {
   dateStripDateLabel,
   daysFromToday,
   fullDateLabel,
+  hasEnded,
   isToday,
   isTomorrow,
   localMidnight,
@@ -575,13 +576,34 @@ export default function SearchSurface() {
     window.localStorage.setItem("dropin-results-density", next);
   }
 
+  // Phase 5B response-size architecture: /api/sessions now redirects to a
+  // raw, unfiltered R2 object (in R2 mode) — the server-side
+  // applyReadTimeView() step that used to exclude already-ended sessions
+  // no longer runs before the client receives this data. This replicates
+  // that exact exclusion here, once, against `now` at the moment the
+  // fetch resolves — exactly mirroring the server's own "filter against
+  // live now at read time" semantic, using the same shared hasEnded()
+  // from lib/dropin/time.ts (zero duplicated logic). This keeps `sessions`
+  // state holding the same property it always has for every downstream
+  // consumer (search's parseQuery, Discovery, Results): "already excludes
+  // sessions ended as of the fetch." The existing `liveSessions` re-check
+  // below (unchanged) continues to serve its own, narrower, already-
+  // documented purpose — sessions that end while the page stays open
+  // between fetches, not this initial exclusion.
+  //
+  // The legacy `day` (today/tomorrow) label the server used to attach
+  // here is deliberately not replicated — confirmed to have zero
+  // consumers anywhere in this file (superseded by `date`, per the
+  // Session type's own comment), and it's one of the fields the combined
+  // R2 object no longer even carries.
   useEffect(() => {
     let cancelled = false;
     fetch("/api/sessions")
       .then((res) => res.json())
       .then((data: { sessions: Session[] }) => {
         if (cancelled) return;
-        setSessions(data.sessions);
+        const now = new Date();
+        setSessions(data.sessions.filter((s) => !hasEnded(new Date(s.endDateTime), now)));
         setLoading(false);
       });
     return () => {
