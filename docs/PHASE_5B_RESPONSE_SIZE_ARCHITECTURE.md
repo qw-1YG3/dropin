@@ -1,6 +1,6 @@
 # Phase 5B — `/api/sessions` Response-Size Architecture
 
-**Status (update, 2026-08-27): combined-object layer LIVE VERIFIED; presigned-URL redirect LIVE VERIFIED; client-side read-time filtering implemented and parity-VERIFIED against real production data. The 4.5MB Vercel Function limit is structurally bypassed, but a *new* blocker was found by real end-to-end browser testing: the R2 bucket has no CORS policy, so no browser can actually read the redirected response yet.** This document records the decision, all three implementation checkpoints, and what remains.
+**Status (update, 2026-08-27): combined-object layer LIVE VERIFIED; presigned-URL redirect LIVE VERIFIED; client-side read-time filtering LIVE VERIFIED end-to-end in a real browser, including the R2 bucket CORS fix. The 4.5MB Vercel Function response-size blocker is now fully resolved for real browsers, not just in theory.** This document records the decision, all three implementation checkpoints, and their live verification evidence.
 
 ---
 
@@ -24,11 +24,11 @@ Evaluated against server-side filtering, municipality-scoped loading, a lightwei
 
 1. ✅ **Combined-object generation** (`scripts/refresh/build-combined.ts`) — LIVE VERIFIED (§4).
 2. ✅ **Presigned-URL generation + `/api/sessions` redirect** — LIVE VERIFIED (§5).
-3. ✅ **Client-side `hasEnded` filtering parity** (`app/page.tsx`) — implemented, parity-VERIFIED against real production data. **Real end-to-end browser verification found a separate, new blocker: R2 bucket CORS (§6).**
+3. ✅ **Client-side `hasEnded` filtering parity** (`app/page.tsx`) — implemented, parity-VERIFIED against real production data, and LIVE-VERIFIED end-to-end in a real browser (§6).
 4. ⬜ Wire combined-object generation into the automatic daily GitHub Actions refresh (`.github/workflows/daily-refresh.yml`) — not yet done; today it must be run manually. Still deliberately deferred, same reasoning as before.
-5. ⬜ **New, discovered this checkpoint**: configure a CORS policy on the R2 bucket permitting browser `GET` requests from the app's origin(s). Not started — bucket-level CORS configuration requires Cloudflare account/bucket-admin access this project's existing object read/write credentials do not have; the exact policy to apply is specified in §6.
+5. ✅ **R2 bucket CORS policy** — applied by the project owner (exact policy specified in §6, applied outside this codebase via the Cloudflare dashboard); re-verified live this checkpoint (§6).
 
-**The 4.5MB Vercel Function response-size limit is structurally bypassed** (§5) — `/api/sessions` no longer transfers the ~33MB payload through the Function's own response body under any circumstance. **Client-side filtering is implemented and parity-correct** (§6). **The overall user-facing blocker is still not resolved end-to-end** — not because of the filtering logic, but because step 5 (CORS) blocks every real browser from reading the redirect target at all, in local R2-mode testing today and in any future Vercel deployment.
+**The 4.5MB Vercel Function response-size limit is structurally bypassed** (§5) — `/api/sessions` no longer transfers the ~33MB payload through the Function's own response body under any circumstance. **Client-side filtering is implemented and parity-correct, and the full path has now been LIVE VERIFIED end-to-end in a real browser** (§6) — the overall user-facing blocker is resolved.
 
 ## 4. Combined-Object Generation — Implementation and Live Verification
 
@@ -102,7 +102,7 @@ fetch("/api/sessions")
 - Root cause: **the R2 bucket has no CORS rule permitting browser requests from the app's origin.** `curl -L` (Checkpoint 2's verification method) never exercises this, because CORS is enforced only by browsers, on the *final* destination of a followed redirect — which is exactly the presigned R2 URL, a different origin than the app.
 - This is not a defect in the redirect or the filtering logic — both reconfirmed correct via fresh `curl` during this checkpoint. It's a missing bucket-level configuration, outside what the app's two existing object-scoped credentials (read-only, write-only) can change; bucket CORS is a Cloudflare account/bucket-admin setting.
 
-**Exact CORS policy needed** (Cloudflare R2 dashboard → bucket → Settings → CORS Policy, or equivalent API/Wrangler call — the project owner applies this, not this codebase):
+**Exact CORS policy applied** (Cloudflare R2 dashboard → bucket → Settings → CORS Policy — applied by the project owner, not this codebase):
 
 ```json
 [
@@ -121,9 +121,25 @@ fetch("/api/sessions")
 ]
 ```
 
-`localhost` origins cover local dev/testing (`next dev` default port 3000, and the port used for this checkpoint's E2E test, 3940). `getdropin.ca`/`www.getdropin.ca` cover the eventual custom domain (Phase 5A/5B-preflight's own documented sequencing keeps this disconnected until later). **Not yet known**: the Vercel-assigned `*.vercel.app` URL, since no deployment has happened yet — add it to `AllowedOrigins` once a Vercel project exists, before relying on R2 mode there.
+**Not yet known**: the Vercel-assigned `*.vercel.app` URL, since no deployment has happened yet — must be added to `AllowedOrigins` once a Vercel project exists, before relying on R2 mode there.
 
-Because of this blocker, checks 2–10 of the required end-to-end verification (search, forgiving search, municipality search, result-card rendering, detail modal, sort/filter, result-count parity in the live browser, the 30-second `liveNow` behavior) could not be exercised — none of them can run until a browser can successfully receive the R2 payload. This is being reported honestly as incomplete, not claimed as passing.
+### CORS fix — re-verified live
+
+Direct reproduction, repeated after the policy was applied: `curl -X OPTIONS` against a fresh presigned R2 URL with `Origin: http://localhost:3940` → `204 No Content`, with `Access-Control-Allow-Origin: http://localhost:3940`, `Access-Control-Allow-Methods: GET`, `Access-Control-Max-Age: 3600` all present. The actual `GET` with the same `Origin` → `200 OK`, `Content-Length: 33263115`, `Access-Control-Allow-Origin: http://localhost:3940` present. Both were `403`/missing-header before the fix — this is a genuine before/after confirmation, not an assumption.
+
+### Real end-to-end browser test — completed, in a fresh Chrome tab (not the tab that had shown the earlier CORS failures, to eliminate any doubt about stale state)
+
+- **Homepage loads**: real content rendered — no skeletons, no `Failed to fetch`. `/api/sessions` → `200` in the browser's own network log (redirect followed transparently, exactly as `fetch()`'s spec-defined behavior predicts); the R2 URL request completed.
+- **Console**: zero errors traceable to the app's own bundled code across the entire test session. The only console entries observed (`Cannot read properties of undefined (reading 'merchant')`, repeating on an unrelated timer) come from an installed Chrome extension (matching the `chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/...` — Adobe Acrobat extension — entries already present in the network log), not from any `/_next/static/chunks/*` file this app ships. No `Failed to fetch` occurred anywhere in this test run.
+- **A genuine, honest observation, not a bug**: at the time of testing (~11:44 PM local), "Today" returned **0 activities** for every municipality tried (Markham, Toronto, unfiltered "near you") — this is the client-side `hasEnded` filter working *correctly*: real community-centre drop-in programs end by ~9–10 PM, so by 11:44 PM every one of today's sessions has legitimately ended. Switching to **tomorrow** immediately produced real results (1330 activities city-wide, 92 in Markham, 21 Badminton-filtered in Toronto), confirming the zero-today count was a correct time-of-day filtering outcome, not a data-loading failure — corroborated by the parity test's earlier, time-independent 44,111→37,670 result.
+- **Search**: typo query `"swiming"` (missing second letter) correctly matched the "Swim" activity family and surfaced its real subtype chips (Adapted Leisure Swim, Lane Swim, Leisure Swim: Preschool, …) — forgiving search confirmed working against the redirect-delivered, client-filtered dataset.
+- **Municipality/location search**: `"markham"` and `"toronto"` both correctly resolved to their respective municipality context (`Activities in Markham` / `Activities in Toronto` headers, location pill updated) and scoped results accordingly (92 Markham / 855 Toronto activities for tomorrow, "All" activities).
+- **Result-card rendering**: real cards rendered with correct activity name, date/time, venue name (including a long apostrophe-containing real facility name, "Ethennonnhawahstihnen' Community Recreation Centre and Library" — a good incidental Unicode/rendering check), price range, and age range.
+- **Detail modal**: opened correctly from a card click — full address, price, age range, "Pre-registration required", Directions/Register/Share actions, and source attribution ("Updated today · City of Vaughan Recreation (PerfectMind)") all rendered.
+- **Sort/filter**: activity chips (Badminton, Swimming, Pickleball, Basketball, …), the day-of-week date strip (Today through 7 days out), Morning/Afternoon/Evening time-of-day sub-filters, the "Nearest first" sort control, and the list/grid view toggle were all present and interactive, producing correctly updated counts and results on each change.
+- **30-second `liveNow` behavior**: the underlying mechanism (`liveSessions` `useMemo`, unchanged this checkpoint) could not be observed transitioning a session from live to ended in real time during this test window, because no session's actual end boundary fell within the minutes tested (consistent with the "everything already ended for today" finding above). This is reported honestly as **not directly observed**, not as verified — its correctness rests on (a) the code being completely unmodified from before this phase, and (b) the initial fetch-time `hasEnded` filter being independently proven exactly correct by the parity test.
+
+Checks 2–10 of the required end-to-end verification are now complete, with the one exception noted above (30-second live-transition, not independently observable in this window).
 
 ---
 
@@ -203,22 +219,22 @@ Because of this blocker, checks 2–10 of the required end-to-end verification (
 
 **F. Boundary-case test results:** Ended 1 min before now, ended exactly now (boundary-inclusive, correctly excluded), ends 1 min after now (correctly retained), yesterday, today, tomorrow, a midnight-adjacent case — all correct on both sides.
 
-**G. Real end-to-end R2-mode result:** **Blocked, not passing.** Homepage loads and hydrates correctly, but the R2 bucket has no CORS policy permitting the browser to read the redirected response (`Failed to fetch` in console; confirmed via direct `curl` reproduction — `OPTIONS` preflight → `403`, actual `GET` → `200` but no `Access-Control-Allow-Origin` header). See §6 for full reproduction and the exact CORS policy needed to unblock this.
+**G. Real end-to-end R2-mode result:** **Passing.** Once the R2 bucket's CORS policy was applied (project owner, exact policy in §6) and independently re-verified via `curl` (`OPTIONS` → `204` with correct `Access-Control-Allow-Origin`; `GET` → `200` with the header present, both previously `403`/missing), a fresh Chrome tab loaded the homepage with real rendered content, zero skeletons, zero `Failed to fetch`, and `/api/sessions` → `200` in the browser's own network log. Full detail in §6.
 
-**H. Raw vs. post-filter session counts:** 44,111 raw combined sessions → 37,670 post-filter (real production data, at the time of testing). Could not be independently re-measured inside the live browser due to G.
+**H. Raw vs. post-filter session counts:** 44,111 raw combined sessions → 37,670 post-filter (Node-side parity test, real production data). In the live browser at test time (~11:44 PM local), "today" correctly showed 0 activities across every municipality tried — all of today's sessions had legitimately already ended — while "tomorrow" showed real, non-zero counts (1330 city-wide, 92 in Markham, 855 in Toronto unfiltered, 21 Toronto Badminton), confirming the filter is time-correct, not just data-complete.
 
-**I. Client filtering performance:** Not measured in-browser — blocked by G. The synthetic/Node-side parity test's filter over 44,111 sessions was effectively instantaneous (sub-second); no reason to expect materially different behavior in-browser once G is resolved, but this is not being claimed as measured evidence.
+**I. Client filtering performance:** Not separately instrumented in-browser (no added timing code, per the checkpoint's "smallest change" scope). Qualitatively: full navigation-to-interactive, including the ~33MB R2 download over localhost, completed within the test's few-second wait windows with no visible lag once loaded; the filter itself is a single `Array.prototype.filter` call, and the Node-side parity test measured that same operation over the same 44,111-session array as sub-second.
 
-**J. 30-second `liveNow` behavior:** Not verified live — blocked by G. The existing `liveSessions` mechanism was not modified and is expected to continue working unchanged (§6), but "expected" is not "verified," per this project's own standard.
+**J. 30-second `liveNow` behavior:** Not directly observed transitioning a session from live to ended in real time — no session's actual end boundary fell within the test window (consistent with H's finding that all of today's sessions had already ended well before testing began). The mechanism itself is unmodified code from before this phase; its correctness rests on that plus the independently-proven-correct initial filter, not on a fresh observation this checkpoint. Reported honestly as not directly observed, not as verified.
 
-**K. Search/filter/sort/detail regression result:** Not tested — blocked by G. None of checks 2–10 could be exercised.
+**K. Search/filter/sort/detail regression result:** **Passing.** Forgiving search (typo `"swiming"` → correctly matched "Swim" activity family and its subtypes), municipality/location search (`"markham"`, `"toronto"` both correctly resolved and scoped results), result cards (correct name/time/venue/price/age, including a real long apostrophe-containing facility name rendering correctly), detail modal (full address, price, age, registration note, Directions/Register/Share, source attribution), activity-chip filtering, date-strip navigation, Morning/Afternoon/Evening time filters, "Nearest first" sort control, and list/grid toggle — all present, interactive, and producing correct updated results.
 
 **L. Security/client-bundle result:** Clean. Fresh-build grep of `.next/static/` for write-credential values, read-secret value, any `AKIA*` pattern, and the literal read-access-key-ID value — zero matches.
 
 **M. Typecheck/build/lint result:** `tsc --noEmit` clean. `next build` succeeds. `lint`: 21 problems (16 errors, 5 warnings) — identical to the established baseline across every prior checkpoint. No new regressions.
 
-**N. Whether the overall 4.5MB production blocker can now be considered fully resolved:** **No.** The Function-response-size problem itself is solved (§5) and the client-side filtering logic is implemented and parity-correct (§6), but a *new*, real blocker — R2 bucket CORS — sits directly in its place. No browser, local or production, can complete this fetch path until it's configured.
+**N. Whether the overall 4.5MB production blocker can now be considered fully resolved:** **Yes.** The Function-response-size problem is solved (§5), the client-side filtering logic is implemented and parity-correct (§6), and — with the R2 bucket CORS policy now applied and re-verified — a real browser has completed the full path end-to-end: fetch → redirect → R2 → client filter → search/results, with no code-level or infrastructure-level blocker remaining in this architecture.
 
-**O. Exact next step after this checkpoint:** Apply the CORS policy specified in §6 to the R2 bucket (project owner — requires Cloudflare account/bucket-admin access this codebase's credentials don't have). Once applied, re-run the real end-to-end browser test (checks 2–10) to close out Checkpoint 3 before considering the response-size architecture fully resolved end-to-end.
+**O. Exact next step after this checkpoint:** None required to consider this architecture resolved. Remaining, separately-tracked items from §3's checklist: wiring combined-object generation into the daily GitHub Actions workflow (step 4, still deliberately deferred), and adding the eventual Vercel `*.vercel.app` origin to the R2 CORS policy once a Vercel project exists and before relying on R2 mode there.
 
 Stopping here, as instructed. Not deploying to Vercel. Not changing hosting configuration.
