@@ -49,6 +49,18 @@ import type { Session } from "@/lib/dropin/types";
 
 const SUGGESTION_POOL = ["Badminton", "Pickleball", "Basketball", "Swimming", "Lane Swim", "Leisure Swim", "Yoga", "Open Gym", "Table Tennis"];
 
+// Mobile UX Polish pass — the current stable production URL, used in Share
+// content so a recipient can find their way back to DropIn (see
+// handleShare below). Deliberately points at the real, live Vercel
+// deployment (`https://getdropin.vercel.app`) rather than `getdropin.ca` —
+// the custom domain is registered and used for email routing already
+// (lib/dropin/contact.ts), but is NOT yet attached to the deployed app
+// (see docs/PHASE_5B_PRODUCTION_INFRASTRUCTURE_PREFLIGHT.md §10), so a
+// share link pointing at it would not resolve to anything today. Update
+// this one constant when the custom domain is attached — no other file
+// references a DropIn site URL.
+const PUBLIC_SITE_URL = "https://getdropin.vercel.app";
+
 // Real, grounded examples only — every activity and district named here is
 // actually supported, so the rotation never implies a search that wouldn't
 // work. Static default first, so the first paint matches what screen
@@ -184,16 +196,40 @@ function daysAgoLabel(raw: string): string {
   return `Updated ${days} days ago`;
 }
 
-// Prefers real coordinates when a future source actually has them; Toronto
-// Open Data doesn't, so today this always falls back to a text-address
-// search query — still a real, working Maps link rather than a stub.
+// Mobile UX Polish pass — physical-device QA found some activities opening
+// Google Maps as a raw, unlabeled "43.xxxxx,-79.xxxxx" pin instead of a
+// recognizable place. Root cause: the old version preferred coordinates
+// whenever present and never even looked at the venue name/address in that
+// case. `centre` is a required field on every Session (never empty), so a
+// human-readable "venue name, address, municipality" query is available for
+// every real session today — and is what actually resolves to a properly
+// labeled Google Maps place, exactly what a person would type in
+// themselves. This is a real accuracy improvement, not just a prettier
+// label: a well-known public venue's own listed address is at least as
+// reliable a destination as a raw lat/long, and text search additionally
+// benefits from Google's own place-matching rather than dropping a pin at a
+// bare coordinate. Coordinates remain a real fallback — reachable today only
+// if a future source somehow supplies latitude/longitude without a usable
+// centre name, which no current source does, but the type system doesn't
+// guarantee that forever.
 function directionsUrl(s: Session): string {
+  const placeParts = [s.centre, s.address, s.municipality].filter(Boolean);
+  if (placeParts.length > 0) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeParts.join(", "))}`;
+  }
   if (s.latitude !== undefined && s.longitude !== undefined) {
     return `https://www.google.com/maps/search/?api=1&query=${s.latitude},${s.longitude}`;
   }
-  const parts = [s.address, s.centre, s.municipality].filter(Boolean);
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parts.join(", "))}`;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.municipality)}`;
 }
+
+// Future navigation improvement, not built this pass (would need either a
+// map-provider preference setting or platform/user-agent sniffing to guess
+// intent — real complexity, not a safe one-line addition here): on mobile,
+// DropIn should eventually let a user open Directions in their own
+// preferred map app (Apple Maps, Google Maps, Waze) rather than always
+// assuming Google Maps. Documented here as a known follow-up, not
+// implemented.
 
 // Phase 4.2 — real user geolocation, kept entirely separate from
 // persistentLocation/locationOverride above: those represent an explicit
@@ -1151,17 +1187,44 @@ export default function SearchSurface() {
   // Native share sheet where it exists; a clipboard copy (with a brief
   // "Copied" confirmation on the button itself) everywhere else — no new
   // UI, just a real action behind a button that previously did nothing.
+  //
+  // Mobile UX Polish pass — physical-device QA confirmed the native iOS
+  // share sheet itself works correctly, but the shared content was just
+  // "Activity — Centre": no time, and no way back to DropIn (the old `url`
+  // was the municipality's own official listing, when one existed at all,
+  // never DropIn itself).
+  //
+  // A stable per-activity deep link (so the recipient could land directly
+  // back on THIS session) was considered and deliberately not built:
+  // inspecting the current architecture first (before writing any of this)
+  // found no per-session route or URL-addressable state at all — the app is
+  // a single client-side route (`/`) with the Quick Action Sheet driven
+  // entirely by in-memory state, never synced to the URL. A session's own
+  // `id` is also tied to one specific dated occurrence (see Session.id's
+  // own comment in lib/dropin/types.ts) and ages out of the dataset once
+  // that date passes — a link built from it would silently go stale within
+  // days to a couple of weeks, not a "share this and it always works" link.
+  // Building a real one would mean a new dynamic route, URL state sync, and
+  // "this activity is no longer available" handling — a genuine
+  // architecture change, exactly what this focused pass should not invent.
+  // Documented here as a real future improvement instead: a stable
+  // recurring-program-level deep link (keyed off sourceScheduleId, which
+  // does identify the same recurring program across dates, rather than one
+  // dated occurrence) would be the right foundation for it.
+  //
+  // What ships now: real structured content (name, time, venue) plus the
+  // current live DropIn URL (PUBLIC_SITE_URL, above) so a recipient can
+  // always at least get back to the app itself, even without a link to
+  // this exact activity. Never includes the user's own device location —
+  // nothing below reads userLocation/coordinates, by construction.
   async function handleShare(s: Session) {
     const displayName = displayActivityName(s);
-    const summary = [`${displayName} — ${s.centre}`, timeLabel(s, computeStatus(s, liveNow), now), s.officialUrl].filter(Boolean).join("\n");
+    const timeText = timeLabel(s, computeStatus(s, liveNow), now);
+    const shareText = [displayName, timeText, s.centre, "", `View on DropIn: ${PUBLIC_SITE_URL}`].join("\n");
 
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
-        await navigator.share({
-          title: displayName,
-          text: `${displayName} — ${s.centre}`,
-          ...(s.officialUrl ? { url: s.officialUrl } : {}),
-        });
+        await navigator.share({ title: displayName, text: shareText, url: PUBLIC_SITE_URL });
       } catch {
         // User cancelled the native share sheet — not an error, nothing to do.
       }
@@ -1170,7 +1233,7 @@ export default function SearchSurface() {
 
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       try {
-        await navigator.clipboard.writeText(summary);
+        await navigator.clipboard.writeText(shareText);
         setShareCopied(true);
         if (shareResetTimer.current) clearTimeout(shareResetTimer.current);
         shareResetTimer.current = setTimeout(() => setShareCopied(false), 1500);
@@ -1626,31 +1689,41 @@ export default function SearchSurface() {
                 how many real choices exist) — adding it to the divider
                 instead means "the whole refinement cluster sits clearly
                 apart from results" holds true regardless of which row is
-                actually last, without needing per-case spacing logic. */}
-            <div className="mt-3 flex items-center justify-between border-t border-border/70 py-4 text-xs text-text-secondary">
-              {/* Now the one place the active activity is actually named —
-                  absorbing the job the removed standalone heading used to
-                  do, rather than duplicating it above the filters. Nearest
-                  first (Phase 4.4B, relabelled/restyled in a later polish
-                  pass) sits right next to it, not with the density toggle on
-                  the right: it's a ranking preference, the same family as
-                  the count text describing what's being shown, not a
-                  presentation control like density.
-                  A quiet outlined pill, not a chip: `border` is present on
-                  BOTH states (only its color changes — transparent when
-                  active) specifically so the box model never changes size
-                  between inactive/active and toggling never shifts
-                  neighbouring layout. Deliberately lighter-weight than the
-                  real Activity chips (no shadow, no hover-lift, tighter
-                  padding, font-medium not semibold) so it reads as related
-                  but subordinate — a ranking preference, not another
-                  filter. Inactive text uses sage-text at reduced opacity
-                  ("muted green") purely so active (full-opacity sage-text,
-                  "deeper green") has somewhere higher to read as deeper
-                  against — both are the one existing interactive/brand
-                  green, no new color introduced. */}
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="truncate">{`${resultsFiltered.length} ${activityDisplayLabel ? `${activityDisplayLabel} ` : ""}${resultsFiltered.length === 1 ? "activity" : "activities"}${lastUpdatedLabel ? ` · ${lastUpdatedLabel}` : ""}`}</span>
+                actually last, without needing per-case spacing logic.
+
+                Mobile UX Polish pass — physical-device QA found this row
+                crowded on narrow screens: count text, Nearest first, and
+                the density toggle all competing for one line meant the
+                count truncated more than necessary. Below are two
+                breakpoint-gated variants of the exact same three pieces
+                (count text, Nearest first, density toggle — defined once
+                each, rendered into whichever variant is currently visible)
+                rather than one clever flex layout trying to serve both
+                shapes: a two-row stack on mobile (count on its own line,
+                Nearest first + density sharing a second row) and the
+                original single-row layout untouched on desktop
+                (`hidden md:flex`, byte-for-byte the same classes/DOM
+                grouping as before this pass). CSS `hidden` elements are
+                removed from the tab order and the accessibility tree in
+                every modern browser, so having both variants in the DOM
+                never produces duplicate stops for keyboard/screen-reader
+                users — only one variant is ever actually reachable. */}
+            {(() => {
+              const resultsText = `${resultsFiltered.length} ${activityDisplayLabel ? `${activityDisplayLabel} ` : ""}${resultsFiltered.length === 1 ? "activity" : "activities"}${lastUpdatedLabel ? ` · ${lastUpdatedLabel}` : ""}`;
+              // A quiet outlined pill, not a chip: `border` is present on
+              // BOTH states (only its color changes — transparent when
+              // active) specifically so the box model never changes size
+              // between inactive/active and toggling never shifts
+              // neighbouring layout. Deliberately lighter-weight than the
+              // real Activity chips (no shadow, no hover-lift, tighter
+              // padding, font-medium not semibold) so it reads as related
+              // but subordinate — a ranking preference, not another
+              // filter. Inactive text uses sage-text at reduced opacity
+              // ("muted green") purely so active (full-opacity sage-text,
+              // "deeper green") has somewhere higher to read as deeper
+              // against — both are the one existing interactive/brand
+              // green, no new color introduced.
+              const nearestFirstButton = (
                 <button
                   type="button"
                   aria-pressed={nearestActive}
@@ -1665,32 +1738,57 @@ export default function SearchSurface() {
                 >
                   Nearest first
                 </button>
-              </div>
-              <div className="flex flex-shrink-0 items-center gap-1" role="group" aria-label="List density">
-                <button
-                  type="button"
-                  aria-label="Comfortable list"
-                  aria-pressed={density === "comfortable"}
-                  onClick={() => setDensityPersisted("comfortable")}
-                  className={`rounded-md p-1.5 transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-90 ${
-                    density === "comfortable" ? "bg-sage/15 text-sage-text" : "text-text-secondary hover:bg-hover-surface hover:text-sage-text"
-                  }`}
-                >
-                  <ComfortableListIcon className={`h-4 w-4 transition-transform duration-200 ease-out ${density === "comfortable" ? "scale-100" : "scale-90"}`} />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Compact list"
-                  aria-pressed={density === "compact"}
-                  onClick={() => setDensityPersisted("compact")}
-                  className={`rounded-md p-1.5 transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-90 ${
-                    density === "compact" ? "bg-sage/15 text-sage-text" : "text-text-secondary hover:bg-hover-surface hover:text-sage-text"
-                  }`}
-                >
-                  <CompactListIcon className={`h-4 w-4 transition-transform duration-200 ease-out ${density === "compact" ? "scale-100" : "scale-90"}`} />
-                </button>
-              </div>
-            </div>
+              );
+              const densityToggle = (
+                <div className="flex flex-shrink-0 items-center gap-1" role="group" aria-label="List density">
+                  <button
+                    type="button"
+                    aria-label="Comfortable list"
+                    aria-pressed={density === "comfortable"}
+                    onClick={() => setDensityPersisted("comfortable")}
+                    className={`rounded-md p-1.5 transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-90 ${
+                      density === "comfortable" ? "bg-sage/15 text-sage-text" : "text-text-secondary hover:bg-hover-surface hover:text-sage-text"
+                    }`}
+                  >
+                    <ComfortableListIcon className={`h-4 w-4 transition-transform duration-200 ease-out ${density === "comfortable" ? "scale-100" : "scale-90"}`} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Compact list"
+                    aria-pressed={density === "compact"}
+                    onClick={() => setDensityPersisted("compact")}
+                    className={`rounded-md p-1.5 transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-90 ${
+                      density === "compact" ? "bg-sage/15 text-sage-text" : "text-text-secondary hover:bg-hover-surface hover:text-sage-text"
+                    }`}
+                  >
+                    <CompactListIcon className={`h-4 w-4 transition-transform duration-200 ease-out ${density === "compact" ? "scale-100" : "scale-90"}`} />
+                  </button>
+                </div>
+              );
+
+              return (
+                <>
+                  {/* Mobile: row 1 is the count/freshness text alone (never
+                      competing for width), row 2 pairs Nearest first with
+                      the density toggle. */}
+                  <div className="mt-3 flex flex-col gap-2 border-t border-border/70 py-4 text-xs text-text-secondary md:hidden">
+                    <span className="truncate">{resultsText}</span>
+                    <div className="flex items-center justify-between gap-3">
+                      {nearestFirstButton}
+                      {densityToggle}
+                    </div>
+                  </div>
+                  {/* Desktop: original single row, unchanged. */}
+                  <div className="mt-3 hidden items-center justify-between border-t border-border/70 py-4 text-xs text-text-secondary md:flex">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="truncate">{resultsText}</span>
+                      {nearestFirstButton}
+                    </div>
+                    {densityToggle}
+                  </div>
+                </>
+              );
+            })()}
 
             <div className={`space-y-8 motion-safe:animate-[${resultsPulse === 0 ? "contentFadeA" : "contentFadeB"}_180ms_ease-out]`}>
               {loading ? (
@@ -2014,7 +2112,25 @@ export default function SearchSurface() {
           an activity, choose a day and time, and quickly see what&rsquo;s available nearby.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Where does the information come from?</h3>
+        {/* Mobile UX Polish pass — physical-device QA found this sheet
+            readable but text-dense, everything at one flat level with no
+            sense of which facts belong together. Below, the three
+            previously-separate subsections that are really one topic
+            (where the data comes from, how current it is, and the
+            independent-project disclaimer) are grouped under a small,
+            deliberately UNDERSTATED label — smaller and more muted than the
+            subsection headings it groups, so it reads as a quiet category
+            marker rather than another heading of the same weight. That's
+            the specific thing being avoided: stacking four visually
+            identical headings in a row starts to read like a numbered
+            Terms & Conditions document, which this content should not feel
+            like. No accordion — every word remains visible and scannable,
+            exactly as before; only the grouping and spacing changed, never
+            the content itself. */}
+        <h3 className="mt-7 text-[11px] font-semibold uppercase tracking-wide text-text-secondary/50 md:mt-5">
+          Data &amp; accuracy
+        </h3>
+        <h3 className="mt-3 text-xs font-semibold text-sage-text">Where does the information come from?</h3>
         <p className="mt-1 text-sm text-text-secondary">
           DropIn organizes publicly available recreation schedules from official municipal sources —
           currently {AVAILABLE_MUNICIPALITIES_LABEL}. We&rsquo;re working to bring in more municipalities
@@ -2054,8 +2170,12 @@ export default function SearchSurface() {
             would be exactly the false claim this phase exists to remove.
             The address itself stays visible as plain text right below the
             link (Part 13's fallback requirement) for anyone without a
-            configured mail client. */}
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Feedback</h3>
+            configured mail client.
+            mt-7/md:mt-4 (vs. the mt-4 every subsection above uses) — this is
+            a new top-level group, same weight as "Data & accuracy," so it
+            gets the same larger separation from what came before, not the
+            tighter within-group spacing those subsections share. */}
+        <h3 className="mt-7 text-xs font-semibold text-sage-text md:mt-4">Feedback</h3>
         <p className="mt-1 text-sm text-text-secondary">
           Found something wrong or have an idea for DropIn? Let us know about incorrect information,
           something that isn&rsquo;t working, or a suggestion.
@@ -2068,7 +2188,7 @@ export default function SearchSurface() {
         </a>
         <p className="mt-1 text-xs text-text-secondary/70">{PUBLIC_FEEDBACK_EMAIL}</p>
 
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Privacy</h3>
+        <h3 className="mt-7 text-xs font-semibold text-sage-text md:mt-4">Privacy</h3>
         <p className="mt-1 text-sm text-text-secondary">
           DropIn asks for very little.{" "}
           <button
@@ -2106,38 +2226,44 @@ export default function SearchSurface() {
       >
         <p className="mt-2 text-sm text-text-secondary">No account is required to use DropIn.</p>
 
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Location</h3>
+        {/* Mobile UX Polish pass — same information architecture as before
+            (six sections, same order, same wording); only the gap above
+            each heading grows on mobile (mt-6, vs. the original mt-4 kept
+            unchanged on desktop via md:mt-4) for easier long-form reading
+            rhythm on a phone. No grouping change here — unlike About, this
+            hierarchy was already good and the task is spacing only. */}
+        <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Location</h3>
         <p className="mt-1 text-sm text-text-secondary">
           If you choose to use location-based features, your browser may ask for permission to access
           your location. This is used to calculate distance to recreation facilities and to support
           Nearest First sorting. Search works fully without it.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Precise location storage</h3>
+        <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Precise location storage</h3>
         <p className="mt-1 text-sm text-text-secondary">
           Your precise coordinates stay on your device. DropIn does not store them, does not place them in
           URLs, and does not include them in Share content.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Analytics &amp; cookies</h3>
+        <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Analytics &amp; cookies</h3>
         <p className="mt-1 text-sm text-text-secondary">
           DropIn does not currently use analytics, advertising tracking, or cookies for tracking, and has
           no accounts to track.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Feedback email</h3>
+        <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Feedback email</h3>
         <p className="mt-1 text-sm text-text-secondary">
           If you email us, the information you choose to share is handled through email — DropIn does not
           store feedback in a database.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Other websites</h3>
+        <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Other websites</h3>
         <p className="mt-1 text-sm text-text-secondary">
           DropIn links to official municipal websites and to Google Maps for directions. Those services
           have their own privacy practices.
         </p>
 
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Contact</h3>
+        <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Contact</h3>
         <p className="mt-1 text-sm text-text-secondary">
           Questions about privacy can be sent to{" "}
           <a href={`mailto:${PUBLIC_CONTACT_EMAIL}`} className="text-sage-text underline underline-offset-2">

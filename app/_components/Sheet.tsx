@@ -12,6 +12,12 @@ import { CloseIcon } from "./icons";
 // scrim/panel reappearing right before it's gone.
 const EXIT_DURATION_MS = 200;
 
+// Mobile UX Polish pass — physical-device QA finding: a drag on the handle
+// past this distance (px) counts as "let go of the sheet," matching the
+// natural threshold every native bottom sheet uses (not too twitchy, not so
+// far it feels unresponsive). Anything less snaps back rather than closing.
+const SWIPE_DISMISS_THRESHOLD_PX = 80;
+
 type SheetProps = {
   open: boolean;
   onClose: () => void;
@@ -78,6 +84,31 @@ export function Sheet({
   const [shouldRender, setShouldRender] = useState(open);
   const [closing, setClosing] = useState(false);
 
+  // Swipe-down-to-dismiss, scoped to the drag handle only (never the
+  // content area) — mobile bottom sheets only, since touch events simply
+  // never fire from mouse/trackpad interaction, no separate desktop guard
+  // needed. Scoping the gesture to the handle rather than the whole panel
+  // means normal scrolling/tapping inside the sheet's content is completely
+  // unaffected; only a touch that starts on the small handle nub can ever
+  // move the panel.
+  const [dragY, setDragY] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const dragStartYRef = useRef(0);
+
+  function handleHandleTouchStart(e: React.TouchEvent) {
+    dragStartYRef.current = e.touches[0].clientY;
+    setDragging(true);
+  }
+  function handleHandleTouchMove(e: React.TouchEvent) {
+    const delta = e.touches[0].clientY - dragStartYRef.current;
+    if (delta > 0) setDragY(delta);
+  }
+  function handleHandleTouchEnd() {
+    setDragging(false);
+    if (dragY > SWIPE_DISMISS_THRESHOLD_PX) onClose();
+    setDragY(0);
+  }
+
   // Callers often derive `children`/`titleSlot` from state that's cleared
   // the instant `onClose` fires (e.g. the Quick Action Sheet's `selectedSession
   // && ...`) — that state going null and `open` going false happen in the
@@ -137,7 +168,33 @@ export function Sheet({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`relative w-full max-w-2xl border border-border bg-white p-5 shadow-[0_16px_40px_-8px_rgba(47,43,39,0.20)] ${
+        // Drag transform is applied via inline `style`, independent of the
+        // `animate-[...]` utility classes below — the two never run at the
+        // same time (dragging only happens once fully open; a release past
+        // the threshold calls onClose, which resets dragY to 0 before the
+        // close animation's own transform ever takes over), so there's no
+        // conflict between the two mechanisms.
+        style={dragY > 0 ? { transform: `translateY(${dragY}px)`, transition: dragging ? "none" : "transform 200ms cubic-bezier(0.16,1,0.3,1)" } : undefined}
+        // Scroll comfort — without a height cap, a long sheet (About's five
+        // sections, on a real phone viewport) can grow taller than the
+        // screen; since the panel is bottom-anchored (`items-end`), the
+        // overflow happens at the TOP, pushing the handle/title/Close
+        // completely off-screen with no way to scroll up and reach them —
+        // reproduced live this pass (panel 43.5px taller than a real 757px
+        // viewport). `max-h-[90dvh] overflow-y-auto` on THIS element fixes
+        // it. A separate attempt — the same two classes on a new child
+        // wrapped around only the body content, so the handle/title/Close
+        // could stay pinned while just the content scrolled — was tried
+        // first and reverted: it reproduced a real, confirmed Chrome
+        // rendering defect (background page content bleeding through the
+        // fully-opaque panel), independent of the animation below.
+        // `overflow-y-auto` directly on this already-animated element,
+        // instead of on a new nested scrolling child, does not trigger that
+        // defect — verified live. Trade-off, accepted deliberately: the
+        // handle/title/Close now scroll away with long content instead of
+        // staying pinned, but that's a minor cost against the alternative
+        // (content genuinely unreachable).
+        className={`relative max-h-[90dvh] w-full max-w-2xl overflow-y-auto overscroll-contain border border-border bg-white p-5 shadow-[0_16px_40px_-8px_rgba(47,43,39,0.20)] ${
           closing
             ? `pointer-events-none motion-safe:animate-[slideDown_${EXIT_DURATION_MS}ms_cubic-bezier(0.16,1,0.3,1)_both]`
             : "motion-safe:animate-[slideUp_240ms_cubic-bezier(0.16,1,0.3,1)_both]"
@@ -151,17 +208,40 @@ export function Sheet({
             : "rounded-t-2xl border-b-0"
         }`}
       >
-        <div className={`mb-2 flex justify-center ${isModal ? "md:hidden" : ""}`}>
-          <div className="h-1 w-10 rounded-full bg-border" aria-hidden="true" />
+        {/* Mobile UX Polish pass — physical-device QA found the handle,
+            title row, and Close button too close together. The touch zone
+            below is deliberately taller than the visible pill (an
+            invisible, generous grab target, same "enlarge the tap area
+            without enlarging the visual" idea as the Close button below) and
+            its own bottom padding is what creates the breathing room before
+            the title row — replaces the old bare `mb-2`. `touch-none` stops
+            the browser's own scroll/zoom gesture from fighting the drag
+            while a finger is on the handle specifically; nothing outside
+            this small zone is affected, so normal content scrolling and
+            taps elsewhere in the sheet are untouched. */}
+        <div className={`flex justify-center ${isModal ? "md:hidden" : ""}`}>
+          <div
+            className="flex w-full touch-none justify-center pt-3 pb-5"
+            onTouchStart={handleHandleTouchStart}
+            onTouchMove={handleHandleTouchMove}
+            onTouchEnd={handleHandleTouchEnd}
+          >
+            <div className="h-1 w-10 rounded-full bg-border" aria-hidden="true" />
+          </div>
         </div>
         <div className="mb-3 flex items-center justify-between gap-3">
           {lastContent.current.titleSlot}
+          {/* 44×44 minimum touch target (mobile only — `md:h-auto md:w-auto`
+              reverts to the original, smaller desktop hit area, since this
+              is a touch-ergonomics fix, not a desktop redesign). The visible
+              × glyph itself is unchanged; only the invisible tappable box
+              around it grows, exactly like the handle above. */}
           <button
             ref={closeButtonRef}
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="ml-auto flex-shrink-0 rounded-full p-1.5 text-text-secondary transition-all duration-150 ease-out hover:bg-hover-surface hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-95"
+            className="ml-auto flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full p-1.5 text-text-secondary transition-all duration-150 ease-out hover:bg-hover-surface hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-95 md:h-auto md:w-auto"
           >
             <CloseIcon className="h-4 w-4" />
           </button>

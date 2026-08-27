@@ -1,6 +1,6 @@
 # Phase 5B — `/api/sessions` Response-Size Architecture
 
-**Status (update, 2026-08-27): combined-object layer LIVE VERIFIED; presigned-URL redirect LIVE VERIFIED; client-side read-time filtering LIVE VERIFIED end-to-end in a real browser, including the R2 bucket CORS fix. The 4.5MB Vercel Function response-size blocker is now fully resolved for real browsers, not just in theory.** This document records the decision, all three implementation checkpoints, and their live verification evidence.
+**Status (update, 2026-08-27): combined-object layer LIVE VERIFIED; presigned-URL redirect LIVE VERIFIED; client-side read-time filtering LIVE VERIFIED end-to-end in a real browser, including the R2 bucket CORS fix. The 4.5MB Vercel Function response-size blocker is now LIVE VERIFIED as resolved on the real Vercel production deployment itself (`https://getdropin.vercel.app`), not only in local R2-mode browser testing.** This document records the decision, all implementation checkpoints, and their live verification evidence.
 
 ---
 
@@ -140,6 +140,31 @@ Direct reproduction, repeated after the policy was applied: `curl -X OPTIONS` ag
 - **30-second `liveNow` behavior**: the underlying mechanism (`liveSessions` `useMemo`, unchanged this checkpoint) could not be observed transitioning a session from live to ended in real time during this test window, because no session's actual end boundary fell within the minutes tested (consistent with the "everything already ended for today" finding above). This is reported honestly as **not directly observed**, not as verified — its correctness rests on (a) the code being completely unmodified from before this phase, and (b) the initial fetch-time `hasEnded` filter being independently proven exactly correct by the parity test.
 
 Checks 2–10 of the required end-to-end verification are now complete, with the one exception noted above (30-second live-transition, not independently observable in this window).
+
+---
+
+## 7. First Vercel Production Deployment — LIVE VERIFIED (update, 2026-08-27)
+
+Everything above (§4–§6) was LIVE VERIFIED against real R2, but only via local `next start` in R2 mode — never against an actual deployed Vercel Function. This section records the first real production deployment, which closes that gap: the entire response-size architecture is now LIVE VERIFIED on the real hosting platform it was designed for, not only simulated locally.
+
+**Deployment**: Vercel project `getdropin`, stable domain `https://getdropin.vercel.app`, status Ready.
+
+**Exact credential boundary configured in Vercel** — matches this architecture's design precisely, not merely approximately: exactly 5 environment variables set (`SNAPSHOT_STORAGE=r2`, `R2_ACCOUNT_ID`, `R2_BUCKET_NAME=dropin-snapshots`, `R2_READ_ACCESS_KEY_ID`, `R2_READ_SECRET_ACCESS_KEY`), scoped to both Production and Preview. `R2_WRITE_ACCESS_KEY_ID`, `R2_WRITE_SECRET_ACCESS_KEY`, and `R2_KEY_PREFIX` were deliberately **not** configured — the deployed application holds only the read-only credential, exactly as designed (§2's "presigned URL, not a public bucket/object" decision, and every prior checkpoint's credential-separation verification).
+
+**R2 CORS — the stable origin added**: `https://getdropin.vercel.app` was added to the R2 bucket's `AllowedOrigins`, alongside the already-present `localhost` and `getdropin.ca` entries (§6's CORS policy). This is the *stable* project domain (not a per-deployment preview URL), so this one addition covers this deployment and future ones to the same project without needing to be repeated per-deploy.
+
+**Real production smoke-test evidence** (manually performed by the project owner against `https://getdropin.vercel.app`, not a local simulation):
+- Homepage loaded real activity data, not only skeleton UI.
+- Forgiving search: `swiming` correctly returned Swimming-related results (Lane Swim, Leisure Swim).
+- Municipality search: `markham` correctly scoped results to Markham with real activities/facilities.
+- Date/time filtering: Sunday Aug 30 + Afternoon returned the correctly filtered result set.
+- Result cards rendered correctly with real production data.
+- Detail modal verified for multiple activities (Aquafit: Shallow, Pickleball) — date/time, facility, address, price, age, attendance requirement, freshness/source information, and Directions/Register/Share actions all rendered correctly.
+- No visible CORS, loading, or rendering failure occurred during these checks.
+
+**What this proves that local R2-mode testing could not**: the redirect, the presigned URL, the CORS policy, and the client-side filter all now have real evidence from an actual Vercel Function execution and an actual Vercel-served client bundle — not a `next start` process standing in for one. The 4.5MB Function response-size limit is confirmed structurally bypassed in the environment that limit actually applies to.
+
+**Precise status**: the response-size architecture (§1–§6) is now **LIVE VERIFIED in real production**, not merely code-verified or locally live-verified. This is the deployment checkpoint that upgrades that status — see `docs/PHASE_5B_PRODUCTION_INFRASTRUCTURE_PREFLIGHT.md` for the fuller deployment-checklist record and `docs/LAUNCH_READINESS_PLAN.md` §7 for how this fits the overall launch sequence.
 
 ---
 

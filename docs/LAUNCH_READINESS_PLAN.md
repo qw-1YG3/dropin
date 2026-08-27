@@ -70,26 +70,30 @@ Two principles already established in earlier phases, restated here so they surv
 ## 7. Launch Readiness Sequence (Provisional)
 
 ```
-Current Phase 4 work
+Current Phase 4 work                                    ✅ done
         ↓
-Complete remaining Phase 4 product/location QA
+Complete remaining Phase 4 product/location QA           ✅ done
         ↓
-Launch Readiness
+Launch Readiness                                          ✅ done (this document)
         ↓
-About / Info review
+About / Info review                                       ✅ done
         ↓
-Feedback design
+Feedback design                                            ✅ done
         ↓
-Privacy + Disclaimer
+Privacy + Disclaimer                                       ✅ done
         ↓
-Production Security & Privacy Readiness Audit
+Production Security & Privacy Readiness Audit               ✅ done
         ↓
-Deployment architecture review
+Deployment architecture review                               ✅ done (Phase 5A/5B)
         ↓
-Production deployment
-        ↓
-Post-launch monitoring / QA
+Production deployment                                        ✅ FIRST DEPLOYMENT LIVE VERIFIED
+        ↓                                                    (2026-08-27, getdropin.vercel.app —
+        ↓                                                     see PHASE_5B_PRODUCTION_INFRASTRUCTURE_
+        ↓                                                     PREFLIGHT.md §10)
+Post-launch monitoring / QA                                  ⬜ next
 ```
+
+**Status update (2026-08-27): "Production deployment" has had its first real, LIVE VERIFIED instance** — `https://getdropin.vercel.app`, smoke-tested against real production data, full evidence in `PHASE_5B_PRODUCTION_INFRASTRUCTURE_PREFLIGHT.md` §10 and `PHASE_5B_RESPONSE_SIZE_ARCHITECTURE.md` §7. **This is not yet the full public launch** — `getdropin.ca` remains deliberately disconnected (§3/§8 of that preflight, Phase 5A §10's sequencing, unchanged), and §9's mobile/physical-device verification requirement has not yet been performed against this real deployment. The next step in this sequence, per §9's own standing requirement, is mobile/iPhone verification against the now-live production deployment — not started as part of this checkpoint.
 
 Exact numbering/phase names to be assigned when each step actually begins.
 
@@ -212,3 +216,4 @@ DropIn should keep these distinct, and they should not automatically share the s
 - 2026-08-25 — Added §11 (Launch Observability Strategy) and §12 (Future Backlog — Product Analytics), per explicit user request, as the final Phase 5A documentation item before Phase 5B. Records Cloudflare Web Analytics as the preferred launch-v1 basic-web-analytics option (subject to fresh verification at implementation time), the binding four-step Privacy-update requirement for whenever analytics is actually enabled, and the explicit deferral of detailed product analytics to its own future dedicated design phase. Also added a one-line cross-reference from §3.C to §11. Documentation only — analytics remains fully disabled (confirmed by direct inspection of `app/page.tsx`, unchanged), and the existing Privacy copy's "does not currently use analytics" claim remains accurate and was not touched.
 - 2026-08-26 — Added §13, a required pre-launch gate for production load/concurrency verification, recorded immediately after all 7 municipalities' canonical data was live-migrated to R2 (Phase 5B-2B) — every verification performed through that phase was single-request/sequential, never concurrent, so this gate exists to make sure that gap isn't silently treated as "already covered." Documentation only, per explicit user request — no load-testing tooling was added or run.
 - 2026-08-27 — Added §14, recording Aurora's ActiveCommunities "group fitness" data-completeness limitation as a tracked, non-blocking open issue, discovered during Phase 5B-3's first real production refresh run and diagnosed the same day. Aurora's own Completion Gate (Phase 3.6B) is correctly rejecting the incomplete upstream result; its last-known-good snapshot remains active and unaffected. Explicitly not marked resolved, and the Completion Gate itself must not be weakened or bypassed to force a green run. Documentation only, per explicit user request — no source/adapter code was changed.
+- 2026-08-27 — Updated §7 to record the first real Vercel production deployment (`https://getdropin.vercel.app`) as LIVE VERIFIED — real smoke-tested production data, the exact read-only credential boundary, and the R2 CORS origin addition, full evidence in `PHASE_5B_PRODUCTION_INFRASTRUCTURE_PREFLIGHT.md` §10 and `PHASE_5B_RESPONSE_SIZE_ARCHITECTURE.md` §7. This is the first real instance of the "Production deployment" sequence step, not yet the full public launch — `getdropin.ca` remains disconnected and §9's mobile/physical-device verification requirement is still outstanding, now identified as the next step. Documentation only, per explicit user request — no application code, Vercel configuration, Cloudflare configuration, GitHub Actions, or domain attachment was touched.

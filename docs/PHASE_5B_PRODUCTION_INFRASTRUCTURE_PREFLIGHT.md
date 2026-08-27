@@ -2,6 +2,8 @@
 
 **Scope: preflight only.** Nothing was deployed, no cloud resource was created or modified, no domain was touched, no secret was added anywhere, and no scheduler was implemented. Every claim below reflects a fresh check of the actual repository performed this phase — Phase 5A's documentation is treated as the approved *design*, never assumed to already be the *implementation*. Where something is still live-verified (not carried forward from memory), that's stated explicitly, consistent with this project's standing discipline.
 
+**Status update (2026-08-27): this preflight's plan has since been realized.** The R2 migration, response-size architecture, daily refresh scheduler, and the first real Vercel production deployment have all since happened and are independently documented in their own phase docs (`PHASE_5B2B_R2_STORAGE_INTEGRATION.md`, `PHASE_5B_RESPONSE_SIZE_ARCHITECTURE.md`, `PHASE_5B3_DAILY_REFRESH_SCHEDULER.md`). **§10 below records the first production deployment specifically** — the human-action checklist in §8 is now substantially completed reality, not a future plan; the rest of this document is preserved unchanged as the historical preflight record it was at the time.
+
 ---
 
 ## 1. Re-Reading the Approved Architecture
@@ -217,3 +219,35 @@ Every assumption below was actively re-checked this phase, not assumed still tru
 3. **R2 bucket naming** (`dropin-snapshots` suggested, not fixed) — a trivial choice, but one the owner should make rather than have silently assumed.
 
 Stopping here, as instructed. No deployment, no cloud resource creation, no domain connection, and no Phase 5B-2 implementation was started.
+
+---
+
+## 10. First Production Deployment — LIVE VERIFIED (update, 2026-08-27)
+
+This closes out the Vercel portion of §8's Human Action Checklist against real evidence, months after this preflight's original planning.
+
+**Vercel project**: `getdropin`. **Stable project domain**: `https://getdropin.vercel.app`. **Deployment status**: Ready.
+
+**Environment variables actually configured** — exactly 5, scoped to both Production and Preview, matching §3/§4's original least-privilege recommendation precisely:
+
+| Variable | Configured in Vercel? |
+|---|---|
+| `SNAPSHOT_STORAGE=r2` | Yes |
+| `R2_ACCOUNT_ID` | Yes |
+| `R2_BUCKET_NAME=dropin-snapshots` | Yes |
+| `R2_READ_ACCESS_KEY_ID` | Yes |
+| `R2_READ_SECRET_ACCESS_KEY` | Yes |
+| `R2_WRITE_ACCESS_KEY_ID` / `R2_WRITE_SECRET_ACCESS_KEY` | **Deliberately not configured** — matches §4's original "the running application never needs write capability, so it should never even *possess* write-capable credentials" recommendation, realized exactly as planned |
+| `R2_KEY_PREFIX` | Not configured — correctly omitted, defaults to `"production"` |
+
+**R2 CORS**: `https://getdropin.vercel.app` added to `AllowedOrigins`, alongside the pre-existing `localhost` and `getdropin.ca` entries (`PHASE_5B_RESPONSE_SIZE_ARCHITECTURE.md` §6).
+
+**Real production smoke test** (performed by the project owner against the live domain, not simulated): homepage real-data load, forgiving search, municipality search, date/time filtering, result-card rendering, and multi-activity detail-modal verification all passed with no visible CORS, loading, or rendering failure. Full evidence: `PHASE_5B_RESPONSE_SIZE_ARCHITECTURE.md` §7.
+
+**Precise status of this preflight's original open items (§9/§L/§M)**:
+- The redirect-vs-server-filter trade-off (§L/§M-1): **resolved and now LIVE VERIFIED in production** — Option D (presigned-URL redirect + client-side filtering), per `PHASE_5B_RESPONSE_SIZE_ARCHITECTURE.md`.
+- Two-token least-privilege credential scoping (§M-2): **implemented and LIVE VERIFIED in production** — confirmed by the table above.
+- R2 bucket naming (§M-3): resolved — `dropin-snapshots`, as originally suggested.
+- `getdropin.ca` remaining disconnected until deliberately approved (§3/§8's Domain section): **still holds** — this deployment is on `getdropin.vercel.app` only; the custom domain was not attached as part of this checkpoint.
+
+Not touched by this deployment: GitHub Actions configuration, Cloudflare configuration beyond the one CORS origin above, application code, or the custom domain.

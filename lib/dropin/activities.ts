@@ -301,6 +301,35 @@ function stripEmbeddedTime(title: string, startDateTime: string, endDateTime: st
   return title;
 }
 
+// Mobile UX Polish pass, physical-device QA finding: several real titles
+// carry a single trailing "(H:MM am/pm)" — a bare start time, not a range
+// (stripEmbeddedTime above handles the two-sided "(H:MM-H:MM am/pm)" case)
+// — immediately followed on the card/sheet by the real structured time
+// ("Today · 5:45–8:00 PM"), e.g. "Public Swim (5:45 p.m.)" next to a
+// session whose real start time is 5:45 PM. Same exact-match-only
+// discipline as every other layer here: removed only when the embedded
+// time equals the session's own real local start time exactly. Anchored to
+// the END of the title on purpose — more conservative than the range
+// version above, since a mid-string single time in parentheses has no
+// confirmed real example yet and stripping one there risks removing a
+// genuine part of an activity's name.
+function stripEmbeddedSingleTime(title: string, startDateTime: string): string {
+  const match = title.match(/\s*\(\s*(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)\s*\)\s*$/i);
+  if (!match) return title;
+  const isPm = /p/i.test(match[3]);
+  const toMinutes = (h: number, min: number, pm: boolean) => {
+    let hh = h % 12;
+    if (pm) hh += 12;
+    return hh * 60 + min;
+  };
+  const embedded = toMinutes(Number(match[1]), match[2] ? Number(match[2]) : 0, isPm);
+  const toDayMinutes = (dt: string) => Number(dt.slice(11, 13)) * 60 + Number(dt.slice(14, 16));
+  if (embedded === toDayMinutes(startDateTime)) {
+    return title.replace(match[0], "");
+  }
+  return title;
+}
+
 function cleanupPunctuation(title: string): string {
   return title
     .replace(/\s{2,}/g, " ")
@@ -321,6 +350,7 @@ export function displayActivityName(
   title = stripAdultQualifier(title, session.ageMin);
   title = stripEmbeddedAge(title, session.ageMin, session.ageMax);
   title = stripEmbeddedTime(title, session.startDateTime, session.endDateTime);
+  title = stripEmbeddedSingleTime(title, session.startDateTime);
   title = cleanupPunctuation(title);
   return title.length > 0 ? title : session.activity;
 }

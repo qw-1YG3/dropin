@@ -26,6 +26,14 @@ Our goal is to build the easiest way to find a drop-in activity.
 
 ---
 
+## Mobile UX Principle
+
+Mobile is not treated as a scaled-down desktop layout. DropIn should preserve the same product logic across desktop and mobile, while adapting interaction density, touch targets, modal behavior, control grouping, and information hierarchy to the physical constraints of mobile devices.
+
+Desktop optimizations must not automatically be assumed to work on mobile. Physical-device QA should remain part of launch validation.
+
+---
+
 ## Design Workflow
 
 Each major page should follow the same sequence:
@@ -99,6 +107,7 @@ All design explorations live under `/design`, each as its own route (e.g. `/desi
 - 2026-07-29 — Replaced the initial workflow structure with this expanded version: added General Principles, the Product Workflow discussion stages, Collaboration Rules, and an explicit phase-based Roadmap. One substantive change worth flagging under the Collaboration Rules above: the prior Design Workflow had 6 stages with two separate Review checkpoints (after Low-Fidelity, and after High-Fidelity, before Production Build). This version consolidates to a single Review & Refinement stage positioned after High-Fidelity. Proceeding on the assumption this consolidation is intentional; flagging it since the Homepage work already completed did receive an explicit review checkpoint before High-Fidelity began, under the prior process. Also preserved the Preview Environment section from the prior version, since it documents the still-current `/design` route convention and wasn't restated here.
 - 2026-07-29 — Added the Decision Principle section: when multiple solutions exist, prefer the one that keeps the user experience simplest, even at the cost of fewer features. Placed directly after General Principles since it governs how tradeoffs get resolved everywhere else in this document.
 - 2026-08-02 — Production V1: rewrote Current Roadmap, which still described the retired three-page architecture (Homepage/Results as separate phases with a stale checklist) despite Search Surface having long since superseded it, gone through real data integration, and been promoted to production. Added the standing note that DropIn is production as of this date and that this docs folder is the single source of truth going forward, per the explicit direction that closed out this sprint.
+- 2026-08-27 — Added the Mobile UX Principle section, recorded during a focused Mobile UX Polish pass that followed the first real physical-device (iPhone) QA of the production deployment. Placed alongside Decision Principle since it's a standing rule governing design work, not a one-off phase note — mobile adapts interaction density/touch targets/modal behavior/control grouping/information hierarchy to physical constraints while preserving the same product logic as desktop; desktop optimizations are never assumed to carry over untested.
 
 
 
