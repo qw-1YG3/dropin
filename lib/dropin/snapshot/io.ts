@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, copyFileSync } from "node:fs";
 import path from "node:path";
 import { S3Client, GetObjectCommand, PutObjectCommand, CopyObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export interface SnapshotStorage {
   readJsonIfExists<T>(key: string): Promise<T | undefined>;
@@ -156,6 +157,21 @@ export class R2SnapshotStorage implements SnapshotStorage {
       }),
     );
   }
+
+  // A presigned URL is a GET-only, single-object-scoped, time-limited
+  // grant — a property of AWS SigV4 signing itself (Phase 5B response-size
+  // architecture decision), not something this method enforces by
+  // convention. The signature is cryptographically bound to exactly this
+  // bucket + this key + this expiry + the GET method; it cannot be used
+  // to read a different object, list the bucket, or write/delete
+  // anything, regardless of which credential generated it. Generating one
+  // is a local cryptographic operation — no network call, no read of the
+  // object's actual bytes — so it's cheap to call fresh on every request
+  // rather than cached.
+  async getPresignedReadUrl(key: string, expirySeconds: number): Promise<string> {
+    const command = new GetObjectCommand({ Bucket: this.config.bucketName, Key: this.resolveKey(key) });
+    return getSignedUrl(this.client, command, { expiresIn: expirySeconds });
+  }
 }
 
 export function isR2StorageMode(): boolean {
@@ -188,6 +204,24 @@ export function createAppReadStorage(): SnapshotStorage {
     ...r2Credentials("read"),
     keyPrefix: process.env.R2_KEY_PREFIX || "production",
   });
+}
+
+// Phase 5B response-size architecture decision — lets the application
+// redirect a request to R2 directly, bypassing the Vercel Function
+// response-size limit entirely, without ever holding the object's bytes
+// in the Function's own memory. Reuses createAppReadStorage() so this
+// goes through the exact same read-only-credential, production/staging-
+// prefix-aware construction every other application read already uses —
+// there is no separate, parallel credential path for this. Only
+// meaningful in R2 mode; local development has no equivalent concept
+// (there's nothing to redirect to), so this throws if called outside it
+// rather than silently returning something misleading.
+export async function createPresignedReadUrl(key: string, expirySeconds: number): Promise<string> {
+  const storage = createAppReadStorage();
+  if (!(storage instanceof R2SnapshotStorage)) {
+    throw new Error("createPresignedReadUrl requires R2 mode (SNAPSHOT_STORAGE=r2) — no presigned-URL concept exists for local filesystem storage");
+  }
+  return storage.getPresignedReadUrl(key, expirySeconds);
 }
 
 // The refresh pipeline's own path (scripts/refresh/*). Write-capable
