@@ -156,7 +156,31 @@ The Phase 5B response-size architecture (`docs/PHASE_5B_RESPONSE_SIZE_ARCHITECTU
 - `tsc --noEmit`, `next build`, `npm run lint` — all clean, identical baseline (21 pre-existing problems) to every prior checkpoint.
 - Workflow YAML re-parsed successfully; 9 steps in the expected order, `if:` conditions and `id:`s exactly as designed.
 
-**Not live-verified**: an actual GitHub Actions run of the updated workflow. This checkpoint did not push/trigger CI — running the real scheduled/production workflow against the live secrets is the project owner's action, consistent with how prior checkpoints have handled infrastructure the codebase's own credentials/permissions can't reach (e.g. R2 bucket CORS in the response-size architecture checkpoint). No new repository secrets are required for this — the four already configured (§4) are unchanged and sufficient.
+### Real production run — LIVE VERIFIED (update, 2026-08-27)
+
+The project owner triggered the updated workflow manually against real production R2. Observed, real result:
+
+- **Municipality refresh: 6/7 succeeded.** Aurora failed for its already-known, separately-tracked Completion Gate / source-pagination issue (`docs/LAUNCH_READINESS_PLAN.md` §14) — not a new failure, not related to this checkpoint's changes.
+- **`Build combined "all municipalities" object`: PASS.** `canonical/_combined/latest.json` was written to production R2 for real, containing **44,096 sessions**. Read-back via the workflow's write credential (the fallback path added this checkpoint, since `R2_READ_*` is deliberately absent from this workflow): **PASS** — confirming the fallback logic works correctly in the real GitHub Actions environment, not just in this checkpoint's local subshell simulation.
+- **Municipality counts in the real combined object**: Toronto 24,791; Mississauga 15,564; Richmond Hill 213; Vaughan 637; Markham 811; Newmarket 1,910; Aurora 170. (Small day-to-day count deltas vs. the 44,111/local-simulation figures above — e.g. Vaughan 637 vs. 646, Markham 811 vs. 817 — reflect this being a different, later, real refresh cycle with its own real upstream data changes, not a discrepancy or regression.)
+- **Aurora's 170-session last-known-good snapshot was correctly included** in the real combined object, despite Aurora's own refresh failing in this same run — real, non-synthetic confirmation of the exact last-known-good requirement this checkpoint was built to preserve.
+- **`Write combined-object summary`: PASS** — visible on the real run's GitHub Actions summary page.
+- **The workflow ultimately exited 1**, because Aurora's municipality-level failure trips the existing, unchanged `Fail the job if any municipality failed to refresh` step — exactly per the pre-existing, unmodified municipality-failure policy (§6).
+
+**This is correctly characterized as: combined-object integration succeeded; the red workflow status is entirely attributable to Aurora's already-known, already-tracked source issue — not an integration failure, not a defect in this checkpoint's work, and not a new problem.** The combined-object build step (`steps.combined.outputs.exit_code`) itself reported success; had Aurora's issue not existed, this run would have been fully green. The workflow's overall failure signal is doing exactly what §6 documents it should: making a real partial failure visible rather than papering over it — the correct behavior, not a bug.
+
+**Distinguishing what this proves from what a synthetic/local test could:**
+
+| Claim | Status |
+|---|---|
+| Combined-object build step, run for real in GitHub Actions | **LIVE VERIFIED** |
+| Read-back verification fallback (write credential, since `R2_READ_*` is absent from this workflow), run for real in GitHub Actions | **LIVE VERIFIED** — not just this checkpoint's local subshell simulation |
+| Last-known-good preservation for a real, currently-failing municipality (Aurora), in a real GitHub Actions run | **LIVE VERIFIED** |
+| `Write combined-object summary` step, real GitHub Actions summary output | **LIVE VERIFIED** |
+| `Fail the job if the combined-object build failed` step correctly did *not* fire (since the combined build itself succeeded) | **LIVE VERIFIED**, by the observed exit-1 being attributable only to the pre-existing municipality-failure step |
+| Scheduled (`schedule`) cron trigger, unattended | Still **NOT YET OBSERVED** — this was a manual `workflow_dispatch` run, same as Phase 5B-3's original first run; non-blocking, confirmed the same way (next scheduled 13:00 UTC run appearing with trigger type `schedule`) |
+
+No new repository secrets were required — the four already configured (§4) were sufficient for this entire run, including the combined-object step.
 
 ---
 
@@ -190,9 +214,9 @@ The Phase 5B response-size architecture (`docs/PHASE_5B_RESPONSE_SIZE_ARCHITECTU
 
 **G. Live verification performed:** Real R2 write + read-back with only the workflow's exact write-only env (read credential's absence explicitly confirmed via `grep -c R2_READ` = 0 first) — PASS, fallback path exercised for real. Immediate re-run with the full local `.env.local` — PASS via the read-only credential, confirming zero regression. Aurora's real, ongoing (non-synthetic) refresh failure independently proved the last-known-good requirement in both runs. New workflow shell logic (exit-code capture, summary write, fail-trigger condition) independently simulated for both success and failure cases outside GitHub Actions — both correct. `tsc`, `next build`, `lint` — clean, unchanged baseline. Workflow YAML re-parsed — 9 steps in the correct order.
 
-**H. Not live-verified:** An actual GitHub Actions run of the updated workflow — this checkpoint did not push or trigger CI, consistent with treating that as the project owner's action for infrastructure this codebase's own credentials can't reach.
+**H. Live-verified (update, 2026-08-27):** The project owner triggered a real GitHub Actions run. Result: 6/7 municipalities refreshed (Aurora failed on its already-known, tracked Completion Gate issue — unrelated to this checkpoint); combined-object build **PASS**, 44,096 sessions written to production R2, read-back verified via the write-credential fallback for real; Aurora's 170-session last-known-good snapshot correctly included; combined-object summary written. The workflow's overall exit-1 status is attributable entirely to Aurora's pre-existing, separately-tracked failure — the combined-object integration itself succeeded. Full detail: §8 "Real production run — LIVE VERIFIED."
 
-**I. Owner action required:** None to add — the four existing repository secrets (§4) are unchanged and sufficient; no new secrets needed. The only remaining action is optional and at the owner's discretion: trigger a `workflow_dispatch` run (or wait for the next scheduled 13:00 UTC run) to observe the new steps execute in real GitHub Actions, closing the one item not live-verified (H above).
+**I. Owner action required:** None. The four existing repository secrets (§4) were sufficient for the full real run, including the new combined-object step — no new secrets were needed. The only remaining non-blocking item is unattended scheduled-cron observation (next 13:00 UTC run appearing with trigger type `schedule`), unrelated to this checkpoint's own completeness.
 
 **J. Explicitly not done, per instructions:** No redesign of the refresh architecture. No change to application/search/UI code. No deployment to Vercel. No change to the daily schedule, concurrency behavior, or the existing per-municipality validation/promotion/failure-isolation logic.
 
