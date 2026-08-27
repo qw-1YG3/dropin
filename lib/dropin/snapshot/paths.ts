@@ -49,6 +49,20 @@ export function canonicalPreviousPath(slug: string): string {
   return `${canonicalDir(slug)}/previous.json`;
 }
 
+// Phase 5B — the combined, field-trimmed "all municipalities" artifact
+// (scripts/refresh/build-combined.ts), built from whatever is currently
+// active per municipality at canonicalLatestPath(slug) above — never a
+// separate fetch/source. Same 2-slot latest/previous retention as every
+// other snapshot layer; same key-prefix-based production/staging
+// separation the R2 backend already applies to every other key.
+export function combinedLatestPath(): string {
+  return "canonical/_combined/latest.json";
+}
+
+export function combinedPreviousPath(): string {
+  return "canonical/_combined/previous.json";
+}
+
 // Phase 4.1 — one facility-location registry shared across all
 // municipalities (cross-cutting reference data, not per-source raw/
 // canonical session data), built by its own separate, deliberate process

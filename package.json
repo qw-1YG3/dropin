@@ -10,7 +10,8 @@
     "refresh:data": "tsx scripts/refresh/index.ts",
     "refresh:facilities": "tsx scripts/refresh/facility-locations.ts",
     "snapshot:health": "tsx scripts/snapshot-health.ts",
-    "migrate:r2": "tsx scripts/migrate-to-r2.ts"
+    "migrate:r2": "tsx scripts/migrate-to-r2.ts",
+    "build:combined": "tsx scripts/refresh/build-combined.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1118.0",
