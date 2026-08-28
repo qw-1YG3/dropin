@@ -320,14 +320,29 @@ function useUserLocation() {
   return { userLocation, requestLocation };
 }
 
-// The header pill's visible text — an explicit search location always wins
-// (Part 11/12: "pickleball mississauga" and real Near Me stay conceptually
-// distinct, and an explicit query is never overridden by device location).
-// "Near me" is used only once geolocation has actually succeeded — never a
-// guessed neighbourhood name, since that would need reverse-geocoding
-// infrastructure this phase deliberately doesn't add (Part 11).
+// The header pill's visible text — an explicit AREA search location always
+// wins (Part 11/12: "pickleball mississauga" and real Near Me stay
+// conceptually distinct, and an explicit query is never overridden by device
+// location). "Near me" is used only once geolocation has actually succeeded
+// — never a guessed neighbourhood name, since that would need
+// reverse-geocoding infrastructure this phase deliberately doesn't add
+// (Part 11).
+//
+// Round 2 physical-device QA (2026-08-28): a `type: "centre"` match is
+// deliberately excluded here, even though it's a real `effectiveLocation`
+// and correctly narrows results via sessionMatchesLocation elsewhere. A
+// Community Centre is a specific facility, not the broad area/proximity
+// context this pill exists to communicate — showing "Oakridge Community
+// Recreation Centre" in place of "Near me" both misrepresents what the pill
+// means (the header now looked like a single building was the user's
+// location) and, on a real phone, could wrap a long facility name across two
+// lines and distort the header's height. Facility identity belongs in
+// result cards / the Quick Action Sheet, never the global header. Search
+// behavior itself (facility filtering, persistentLocation/locationOverride)
+// is entirely unchanged — this is a display-only exclusion in the one
+// function that decides the pill's text.
 function locationPillLabel(effectiveLocation: DetectedLocation | undefined, userLocation: UserLocation): string {
-  if (effectiveLocation) return effectiveLocation.label;
+  if (effectiveLocation && effectiveLocation.type !== "centre") return effectiveLocation.label;
   if (userLocation.status === "requesting") return "Locating…";
   if (userLocation.status === "granted") return "Near me";
   return "Near you";
