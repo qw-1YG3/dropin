@@ -1945,8 +1945,23 @@ export default function SearchSurface() {
           (() => {
             const ActivityIcon = ACTIVITY_ICONS[getShortcutForActivity(selectedSession.activity) ?? ""];
             return (
-              <h2 id="quick-action-title" className="flex min-w-0 items-center gap-2 text-[18px] font-bold leading-tight text-text-primary">
-                {ActivityIcon && <ActivityIcon className="h-5 w-5 flex-shrink-0 text-text-secondary" />}
+              // Round 2 physical-device QA (2026-08-28): on a real phone the
+              // Activity name — the sheet's primary identity, everything
+              // below it (time, facility, address, age, access) supports
+              // this one fact — read as too close in weight to that
+              // supporting detail. Bumped from text-[18px] (matching
+              // About/Privacy's own title size) to text-2xl, an existing
+              // Tailwind token already at the ~24px territory called for,
+              // not an arbitrary one-off value — mobile-only; `md:text-lg`
+              // (18px) keeps desktop exactly as it was. The icon grows in
+              // step (h-6→24px mobile, back to h-5→20px at md:) so it still
+              // reads as one balanced unit with the larger title rather than
+              // looking undersized next to it.
+              <h2
+                id="quick-action-title"
+                className="flex min-w-0 items-center gap-2 text-2xl font-bold leading-tight text-text-primary md:text-lg"
+              >
+                {ActivityIcon && <ActivityIcon className="h-6 w-6 flex-shrink-0 text-text-secondary md:h-5 md:w-5" />}
                 {displayActivityName(selectedSession)}
               </h2>
             );
