@@ -253,15 +253,38 @@ export function Sheet({
               reverts to the original, smaller desktop hit area, since this
               is a touch-ergonomics fix, not a desktop redesign). The visible
               × glyph itself is unchanged; only the invisible tappable box
-              around it grows, exactly like the handle above. */}
+              around it grows, exactly like the handle above.
+
+              Round 2 physical-device QA (2026-08-28): this outer button used
+              to carry the visible chrome (background, ring) directly, which
+              meant hover/focus-visible/active styles painted the FULL 44×44
+              box — invisible at rest, but a jarringly large sage circle the
+              moment Safari treated this sheet's open-time autofocus
+              (`closeButtonRef.current?.focus()` below) as focus-visible.
+              Decoupled here: this outer element is now purely the
+              interactive hit target (sizing + focus/click semantics only,
+              no visible chrome of its own) and `group` hands its
+              hover/focus-visible/active state down to the small inner span,
+              which carries the actual background/ring/scale and is sized to
+              exactly the ~28px the visible × already occupied at desktop
+              (`p-1.5` + the 16px icon) — so the ring now traces a small
+              quiet circle around the ×, not the full invisible grab zone,
+              at both breakpoints, while the 44×44 touch target and every
+              interaction (click, keyboard, screen-reader name) stay on this
+              same outer button, completely unchanged. */}
           <button
             ref={closeButtonRef}
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="ml-auto flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full p-1.5 text-text-secondary transition-all duration-150 ease-out hover:bg-hover-surface hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-95 md:h-auto md:w-auto"
+            className="group ml-auto flex h-11 w-11 flex-shrink-0 items-center justify-center focus-visible:outline-none md:h-auto md:w-auto"
           >
-            <CloseIcon className="h-4 w-4" />
+            <span
+              aria-hidden="true"
+              className="flex h-7 w-7 items-center justify-center rounded-full p-1.5 text-text-secondary transition-all duration-150 ease-out group-hover:bg-hover-surface group-hover:text-text-primary group-focus-visible:ring-2 group-focus-visible:ring-sage-text group-active:scale-95"
+            >
+              <CloseIcon className="h-4 w-4" />
+            </span>
           </button>
         </div>
         {lastContent.current.children}
