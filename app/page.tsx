@@ -1,4 +1,4 @@
-"use client";
+22"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DateCalendar } from "./_components/DateCalendar";
@@ -1941,41 +1941,31 @@ export default function SearchSurface() {
         narrow
         initialFocusRef={directionsRef}
         titleSlot={
-          selectedSession && (
-            // Round 2 physical-device QA (2026-08-28): on a real phone the
-            // Activity name — the sheet's primary identity, everything
-            // below it (time, facility, address, age, access) supports
-            // this one fact — read as too close in weight to that
-            // supporting detail. Bumped from text-[18px] (matching
-            // About/Privacy's own title size) to text-2xl, an existing
-            // Tailwind token already at the ~24px territory called for,
-            // not an arbitrary one-off value — mobile-only; `md:text-lg`
-            // (18px) keeps desktop exactly as it was.
-            //
-            // Activity Icon Consistency decision (2026-08-28): "icons
-            // support discovery, not identification" — the conditional
-            // sport/activity icon that used to sit here (via
-            // getShortcutForActivity, keyed against ACTIVITY_ICONS) is
-            // deliberately removed, not made unconditional. The lookup
-            // only ever resolved for a small, Toronto-centric slice of
-            // real titles (confirmed: 12/230 for Toronto, ≤1/196 for
-            // every other municipality), so most Activity Detail sheets
-            // showed no icon anyway — inconsistent, not missing. Rather
-            // than grow that lookup into a municipality-wide taxonomy just
-            // to make Detail titles show icons, the title is now
-            // consistently text-only here. Homepage quick-start chips
-            // (ACTIVITY_ICONS[chip], a separate direct lookup) and
-            // getShortcutForActivity's other caller (activityDisplayLabel,
-            // a text label, not an icon) are both untouched — this only
-            // removes the one icon element that used to render in this
-            // title.
-            <h2
-              id="quick-action-title"
-              className="flex min-w-0 items-center gap-2 text-2xl font-bold leading-tight text-text-primary md:text-lg"
-            >
-              {displayActivityName(selectedSession)}
-            </h2>
-          )
+          selectedSession &&
+          (() => {
+            const ActivityIcon = ACTIVITY_ICONS[getShortcutForActivity(selectedSession.activity) ?? ""];
+            return (
+              // Round 2 physical-device QA (2026-08-28): on a real phone the
+              // Activity name — the sheet's primary identity, everything
+              // below it (time, facility, address, age, access) supports
+              // this one fact — read as too close in weight to that
+              // supporting detail. Bumped from text-[18px] (matching
+              // About/Privacy's own title size) to text-2xl, an existing
+              // Tailwind token already at the ~24px territory called for,
+              // not an arbitrary one-off value — mobile-only; `md:text-lg`
+              // (18px) keeps desktop exactly as it was. The icon grows in
+              // step (h-6→24px mobile, back to h-5→20px at md:) so it still
+              // reads as one balanced unit with the larger title rather than
+              // looking undersized next to it.
+              <h2
+                id="quick-action-title"
+                className="flex min-w-0 items-center gap-2 text-2xl font-bold leading-tight text-text-primary md:text-lg"
+              >
+                {ActivityIcon && <ActivityIcon className="h-6 w-6 flex-shrink-0 text-text-secondary md:h-5 md:w-5" />}
+                {displayActivityName(selectedSession)}
+              </h2>
+            );
+          })()
         }
       >
         {selectedSession && (
