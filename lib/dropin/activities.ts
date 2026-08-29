@@ -97,7 +97,12 @@ export function getShortcutForActivity(activity: string): string | undefined {
 //      EXACTLY (not merely "some age is present"). Self-protecting by
 //      construction: an untested future title's embedded age simply won't
 //      match and will be left alone.
-//   4. embedded-time stripping — a trailing "(H:MM-H:MM am/pm)" removed
+//   4. Newmarket-only facility-suffix stripping — a trailing "- Magna"/
+//      "- RTRC"/"- Gorman" removed only when that token maps to the
+//      session's own real `centre` exactly. Scoped to one municipality on
+//      purpose (Activity Title Normalization phase, 2026-08-28) — see
+//      stripNewmarketFacilitySuffix's own comment for the full evidence.
+//   5. embedded-time stripping — a trailing "(H:MM-H:MM am/pm)" removed
 //      only when it matches the session's own startDateTime/endDateTime
 //      exactly. This phase found several real Newmarket titles (Adult
 //      Shinny, Parent & Tot Skate, Shinny <birth-year>) whose embedded end
@@ -267,6 +272,41 @@ function stripEmbeddedAge(title: string, ageMin: number | undefined, ageMax: num
   return title;
 }
 
+// Newmarket-only (Phase: Activity Title Normalization, 2026-08-28). A
+// full-dataset audit of every distinct real title across all 7
+// municipalities found that Newmarket's raw PerfectMind EventName
+// sometimes carries a trailing facility abbreviation — "Group Fitness -
+// Restorative Yoga (4:45 p.m.) - Magna" — that exactly restates the
+// session's own structured `centre`, already shown separately in the UI.
+// Exactly 3 tokens were found across the entire dataset, each mapping 1:1
+// to one of Newmarket's 4 real centres; no other municipality's real data
+// contains this pattern (confirmed directly, including Markham and
+// Vaughan on the same PerfectMind platform) — this is one municipality's
+// own data-entry convention, not a source-family-wide shape, so it's
+// scoped to Newmarket only rather than added to a general vocabulary
+// table. Verified per-session against session.centre before stripping —
+// never matched on the trailing text alone — same "don't guess, verify
+// against structured evidence" discipline as every layer above. Stripping
+// this (rather than leaving it for a generic trailing-hyphen rule, which
+// would also catch real subtype names like "Dance: Line Dance - Advanced"
+// elsewhere) is also what lets the embedded-time layer below reach titles
+// like the Restorative Yoga example above — its single-time pattern is
+// anchored to the end of the string, which the facility suffix was
+// blocking.
+const NEWMARKET_FACILITY_SUFFIX_TO_CENTRE: Record<string, string> = {
+  Magna: "Magna Centre",
+  RTRC: "Ray Twinney Recreation Complex",
+  Gorman: "Gorman Pool",
+};
+
+function stripNewmarketFacilitySuffix(title: string, municipality: string, centre: string): string {
+  if (municipality !== "Newmarket") return title;
+  const match = title.match(/\s*-\s*(Magna|RTRC|Gorman)\s*$/);
+  if (!match) return title;
+  if (NEWMARKET_FACILITY_SUFFIX_TO_CENTRE[match[1]] !== centre) return title;
+  return title.slice(0, match.index);
+}
+
 // Embedded "(H:MM-H:MM am/pm)" text removed only when it matches the
 // session's own real local start/end time exactly (parsed directly from
 // the startDateTime/endDateTime strings, same "unqualified string is
@@ -344,11 +384,12 @@ function cleanupPunctuation(title: string): string {
 // dedup keys, data export) should keep reading `session.activity`
 // directly.
 export function displayActivityName(
-  session: Pick<Session, "activity" | "ageMin" | "ageMax" | "startDateTime" | "endDateTime">,
+  session: Pick<Session, "activity" | "ageMin" | "ageMax" | "startDateTime" | "endDateTime" | "municipality" | "centre">,
 ): string {
   let title = stripDropInNoise(session.activity);
   title = stripAdultQualifier(title, session.ageMin);
   title = stripEmbeddedAge(title, session.ageMin, session.ageMax);
+  title = stripNewmarketFacilitySuffix(title, session.municipality, session.centre);
   title = stripEmbeddedTime(title, session.startDateTime, session.endDateTime);
   title = stripEmbeddedSingleTime(title, session.startDateTime);
   title = cleanupPunctuation(title);
