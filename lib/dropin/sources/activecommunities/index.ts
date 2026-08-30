@@ -12,7 +12,7 @@
 // the Toronto normalizer: a canonical snapshot built once at refresh time
 // must stay correct to read hours later, so "is this within range, has it
 // ended" is applied fresh at request time instead, not baked in here.
-import { createAcSession, getAcFilters, getAcEvents, searchAcActivities, getAcProgramSessions, type AcActivityItem } from "./client";
+import { createAcSession, getAcFilters, getAcEvents, searchAcActivities, searchAcActivitiesMap, getAcProgramSessions, type AcActivityItem, type AcSession } from "./client";
 import { buildAgeLookup } from "./age-join";
 import { normalizeAcEvent, normalizeAcDropInSession } from "./normalize";
 import type { ActiveCommunitiesMunicipalityConfig } from "./config";
@@ -96,6 +96,96 @@ async function fetchDirectCalendar(config: ActiveCommunitiesMunicipalityConfig, 
 // follows), or total_records fits within one page outright, that's a
 // genuine, provable completion — confirmed against all 3 configured
 // keywords in real testing (none came close to hitting this cap).
+// Aurora Source Reliability phase — one centre's activities/list slice,
+// paired with its own reported totals so the merge step below can apply
+// the same Completion Gate to it independently.
+type CentrePartition = { centerId: number; items: AcActivityItem[]; totalRecords: number; recordsPerPage: number };
+
+// Pure — no network calls, exported for direct testing (including the
+// deliberate-mismatch/fail-safe path, which needs no real request to
+// exercise). Applies three independent proofs before trusting a
+// centre-partitioned result, per the Aurora Source Reliability
+// investigation's own integrity requirement:
+//   1. Every individual centre partition must itself pass the exact same
+//      Completion Gate the keyword-level check already applies — a centre
+//      whose own result is capped/incomplete fails the whole fetch, never
+//      silently contributes a partial slice.
+//   2. No activity id may appear in more than one centre partition — a
+//      real duplicate here would mean double-counting the same program.
+//   3. The merged item count, AND the sum of each partition's own
+//      authoritative `total_records`, must both exactly equal the
+//      original unfiltered keyword-level `total_records` — the one number
+//      activities/list itself already claims is the true total. A
+//      mismatch means centre discovery (activities/map) missed something
+//      (e.g. a real ungrouped/unlocated result) — refuse rather than
+//      guess which centres were "enough."
+// Any failure throws the same class of plain, descriptive Error the
+// pre-existing keyword-level gate already throws — never a silent partial
+// result, never a different/weaker failure mode.
+export function mergeCentrePartitions(config: ActiveCommunitiesMunicipalityConfig, keyword: string, originalTotalRecords: number, partitions: CentrePartition[]): AcActivityItem[] {
+  for (const p of partitions) {
+    const dropInItems = p.items.filter((item) => /^drop in/i.test(item.name));
+    if (dropInItems.length === p.items.length && p.items.length > 0 && p.totalRecords > p.recordsPerPage) {
+      throw new Error(
+        `activecommunities client: "${config.municipality}" keyword "${keyword}" centre ${p.centerId} partition itself filled its entire page ` +
+          `with "Drop In"-prefixed results (${p.items.length}/${p.recordsPerPage}, total_records=${p.totalRecords}) with no working pagination to ` +
+          `confirm the cluster ends there — refusing to treat the centre-partition fallback as a complete fetch`,
+      );
+    }
+  }
+
+  const mergedItems = partitions.flatMap((p) => p.items);
+  const ids = mergedItems.map((item) => item.id);
+  if (new Set(ids).size !== ids.length) {
+    throw new Error(
+      `activecommunities client: "${config.municipality}" keyword "${keyword}" centre-partition fallback found duplicate activity ids across ` +
+        `centre partitions — refusing to merge a result that may double-count sessions`,
+    );
+  }
+
+  const summedTotalRecords = partitions.reduce((sum, p) => sum + p.totalRecords, 0);
+  if (summedTotalRecords !== originalTotalRecords || mergedItems.length !== originalTotalRecords) {
+    throw new Error(
+      `activecommunities client: "${config.municipality}" keyword "${keyword}" centre-partition fallback merged ${mergedItems.length} items across ` +
+        `${partitions.length} centres (summed total_records=${summedTotalRecords}) but the original unfiltered search reported total_records=` +
+        `${originalTotalRecords} — centre discovery may have missed a real result (e.g. ungrouped/unlocated) — refusing to treat this as complete`,
+    );
+  }
+
+  return mergedItems.filter((item) => /^drop in/i.test(item.name));
+}
+
+// Discovery-only use of activities/map (never treated as the canonical
+// activity dataset itself — see searchAcActivitiesMap's own comment): asks
+// which real centres exist for this keyword right now, then re-fetches
+// each one individually through the exact same activities/list path every
+// other keyword already uses, so every session that ends up in the
+// canonical output still comes from activities/list, normalized exactly
+// as before.
+async function fetchCappedKeywordViaCentrePartition(
+  session: AcSession,
+  config: ActiveCommunitiesMunicipalityConfig,
+  keyword: string,
+  originalTotalRecords: number,
+): Promise<AcActivityItem[]> {
+  const map = await searchAcActivitiesMap(session, { keyword });
+  if (map.mapPoints.length === 0) {
+    throw new Error(
+      `activecommunities client: "${config.municipality}" keyword "${keyword}" is capped but activities/map returned no centre breakdown to ` +
+        `partition by — refusing to treat this as a complete fetch`,
+    );
+  }
+
+  const partitions: CentrePartition[] = await Promise.all(
+    map.mapPoints.map(async (point) => {
+      const { items, totalRecords, recordsPerPage } = await searchAcActivities(session, { keyword, centerIds: [point.id] });
+      return { centerId: point.id, items, totalRecords, recordsPerPage };
+    }),
+  );
+
+  return mergeCentrePartitions(config, keyword, originalTotalRecords, partitions);
+}
+
 async function fetchDropInCatalog(config: ActiveCommunitiesMunicipalityConfig, now: Date): Promise<ActiveCommunitiesFetchResult> {
   const session = await createAcSession(config.tenant);
   const fetchedAtDateKey = toDateKey(now);
@@ -106,11 +196,15 @@ async function fetchDropInCatalog(config: ActiveCommunitiesMunicipalityConfig, n
     const dropInItems = items.filter((item) => /^drop in/i.test(item.name));
 
     if (dropInItems.length === items.length && items.length > 0 && totalRecords > recordsPerPage) {
-      throw new Error(
-        `activecommunities client: "${config.municipality}" keyword "${keyword}" filled its entire page with "Drop In"-prefixed results ` +
-          `(${items.length}/${recordsPerPage}, total_records=${totalRecords}) with no working pagination to confirm the cluster ends there — ` +
-          `refusing to treat this as a complete fetch`,
-      );
+      // Aurora Source Reliability phase — the keyword-level page is
+      // genuinely capped. Before giving up, try the verified centre-
+      // partition fallback (see mergeCentrePartitions/
+      // fetchCappedKeywordViaCentrePartition above); it throws the same
+      // class of error if it can't prove completeness either, so this
+      // never silently accepts a partial result either way.
+      const partitioned = await fetchCappedKeywordViaCentrePartition(session, config, keyword, totalRecords);
+      activitiesByKeyword.push({ keyword, activities: partitioned });
+      continue;
     }
     activitiesByKeyword.push({ keyword, activities: dropInItems });
   }

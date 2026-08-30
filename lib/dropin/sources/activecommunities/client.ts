@@ -177,40 +177,56 @@ export type AcActivitySearchResult = {
 // results/page by the server itself — confirmed directly; the true total is
 // still reported via `page_info.total_records`, used by the two-tier path
 // to detect a genuine completion boundary (see ../index.ts).
-export async function searchAcActivities(session: AcSession, params: { keyword: string }): Promise<AcActivitySearchResult> {
+// Shared shape between activities/list and activities/map — the two
+// endpoints accept the identical activity_search_pattern, differing only
+// in for_map and (for list) an optional center_ids filter. Factored out
+// once both callers needed it (Aurora Source Reliability phase) rather
+// than duplicated a second time.
+function activitySearchPattern(params: { keyword: string; centerIds?: number[]; forMap: boolean }) {
+  return {
+    skills: [],
+    time_after_str: "",
+    days_of_week: null,
+    activity_select_param: 2,
+    center_ids: params.centerIds ?? [],
+    time_before_str: "",
+    open_spots: null,
+    activity_id: null,
+    activity_category_ids: [],
+    date_before: null,
+    min_age: null,
+    date_after: null,
+    activity_type_ids: [],
+    site_ids: [0],
+    for_map: params.forMap,
+    geographic_area_ids: [],
+    drop_in: 1,
+    season_ids: [],
+    activity_department_ids: [],
+    activity_other_category_ids: [],
+    child_season_ids: [],
+    activity_keyword: params.keyword,
+    instructor_ids: [],
+    max_age: null,
+    is_drop_in: true,
+    custom_price_from: null,
+    custom_price_to: null,
+  };
+}
+
+// `centerIds` (Aurora Source Reliability phase) is optional and defaults to
+// `[]` (every center) — the exact behavior every existing caller already
+// gets. Populating it is how the centre-partition fallback in ../index.ts
+// retrieves one centre's slice at a time; confirmed live that the server
+// honors this filter genuinely server-side (a centre-scoped call reports
+// its OWN, smaller `total_records`, not the global figure) rather than
+// merely truncating a shared result client-side.
+export async function searchAcActivities(session: AcSession, params: { keyword: string; centerIds?: number[] }): Promise<AcActivitySearchResult> {
   const json = await acPost<{ headers: { page_info?: { total_records?: number; total_records_per_page?: number } }; body: { activity_items: AcActivityItem[] } }>(
     session,
     "activities/list",
     {
-      activity_search_pattern: {
-        skills: [],
-        time_after_str: "",
-        days_of_week: null,
-        activity_select_param: 2,
-        center_ids: [],
-        time_before_str: "",
-        open_spots: null,
-        activity_id: null,
-        activity_category_ids: [],
-        date_before: null,
-        min_age: null,
-        date_after: null,
-        activity_type_ids: [],
-        site_ids: [0],
-        for_map: false,
-        geographic_area_ids: [],
-        drop_in: 1,
-        season_ids: [],
-        activity_department_ids: [],
-        activity_other_category_ids: [],
-        child_season_ids: [],
-        activity_keyword: params.keyword,
-        instructor_ids: [],
-        max_age: null,
-        is_drop_in: true,
-        custom_price_from: null,
-        custom_price_to: null,
-      },
+      activity_search_pattern: activitySearchPattern({ keyword: params.keyword, centerIds: params.centerIds, forMap: false }),
       activity_transfer_pattern: {},
     },
   );
@@ -218,6 +234,51 @@ export async function searchAcActivities(session: AcSession, params: { keyword: 
     items: json.body.activity_items,
     totalRecords: json.headers.page_info?.total_records ?? json.body.activity_items.length,
     recordsPerPage: json.headers.page_info?.total_records_per_page ?? json.body.activity_items.length,
+  };
+}
+
+export type AcMapPoint = {
+  // The real, current centre id for this keyword — used as the `centerIds`
+  // filter value in a follow-up searchAcActivities call, never invented.
+  id: number;
+  centerName: string;
+  itemCount: number;
+};
+
+export type AcActivityMapResult = {
+  mapPoints: AcMapPoint[];
+  // Same authoritative figure activities/list itself reports for the
+  // identical unfiltered keyword — used by ../index.ts as the number the
+  // merged centre-partition result must exactly equal before it's trusted.
+  totalRecords: number;
+};
+
+// Aurora Source Reliability phase — activities/list caps at 20 results/page
+// with no working pagination (confirmed exhaustively; see
+// docs/PHASE_3_6B_AURORA_NEWMARKET_PRODUCTION.md and this phase's own
+// investigation). activities/map is a GENUINELY DIFFERENT endpoint the
+// public site's own Map view calls, confirmed live: for a keyword whose
+// list view is capped, it groups the SAME underlying result set by real
+// physical centre, each with its own item_count — and those counts summed
+// exactly equal the capped list view's own `total_records` (verified live:
+// 9+9+9=27 for Aurora's real "group fitness" keyword). This function is a
+// discovery mechanism ONLY — it tells the caller which real centre ids
+// exist for this keyword right now, so ../index.ts can query each one
+// individually via searchAcActivities' centerIds filter. It is deliberately
+// never treated as the canonical activity dataset itself: the per-centre
+// activities/list calls remain the actual source of the Session records
+// that get normalized, exactly as today.
+export async function searchAcActivitiesMap(session: AcSession, params: { keyword: string }): Promise<AcActivityMapResult> {
+  const json = await acPost<{
+    headers: { page_info?: { total_records?: number } };
+    body: { map_points?: { id: number; center_name: string; item_count: number }[] };
+  }>(session, "activities/map", {
+    activity_search_pattern: activitySearchPattern({ keyword: params.keyword, forMap: true }),
+    activity_transfer_pattern: {},
+  });
+  return {
+    mapPoints: (json.body.map_points ?? []).map((p) => ({ id: p.id, centerName: p.center_name, itemCount: p.item_count })),
+    totalRecords: json.headers.page_info?.total_records ?? 0,
   };
 }
 
