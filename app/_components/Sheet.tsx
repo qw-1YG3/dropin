@@ -194,7 +194,7 @@ export function Sheet({
         // handle/title/Close now scroll away with long content instead of
         // staying pinned, but that's a minor cost against the alternative
         // (content genuinely unreachable).
-        className={`relative max-h-[90dvh] w-full max-w-2xl overflow-y-auto overscroll-contain border border-border bg-white px-5 pb-5 pt-3 shadow-[0_16px_40px_-8px_rgba(47,43,39,0.20)] md:pt-5 ${
+        className={`relative max-h-[90dvh] w-full max-w-2xl overflow-y-auto overscroll-contain border border-border bg-white px-5 pb-5 pt-2 shadow-[0_16px_40px_-8px_rgba(47,43,39,0.20)] md:pt-5 ${
           closing
             ? `pointer-events-none motion-safe:animate-[slideDown_${EXIT_DURATION_MS}ms_cubic-bezier(0.16,1,0.3,1)_both]`
             : "motion-safe:animate-[slideUp_240ms_cubic-bezier(0.16,1,0.3,1)_both]"
@@ -226,7 +226,8 @@ export function Sheet({
             sheet, where vertical room is scarcest. Mobile-only, this zone's
             own padding shrinks (pt-3→pt-2, pb-5→pb-3.5) and the panel's own
             top padding above it does too (see the panel `className` above,
-            pt-5→pt-3) — together, the handle sits visibly closer to the
+            pt-5→pt-3, tightened once more to pt-2 in the Mobile Sheet
+            System refinement pass) — together, the handle sits visibly closer to the
             sheet's rounded top edge and the gap before the title is smaller
             but still a deliberate, comfortable gap, never the pre-Mobile-
             Polish bare `mb-2`. `md:` restores the exact original values
@@ -247,6 +248,8 @@ export function Sheet({
             <div className="h-1 w-10 rounded-full bg-border" aria-hidden="true" />
           </div>
         </div>
+        {/* Sheet owns the shared title-row baseline (mb-3); each consumer
+            owns its own spacing into its first content block below. */}
         <div className="mb-3 flex items-center justify-between gap-3">
           {lastContent.current.titleSlot}
           {/* 44×44 minimum touch target (mobile only — `md:h-auto md:w-auto`
