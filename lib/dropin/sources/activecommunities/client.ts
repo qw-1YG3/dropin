@@ -214,19 +214,14 @@ function activitySearchPattern(params: { keyword: string; centerIds?: number[]; 
   };
 }
 
-// `centerIds` (Aurora Source Reliability phase) is optional and defaults to
-// `[]` (every center) — the exact behavior every existing caller already
-// gets. Populating it is how the centre-partition fallback in ../index.ts
-// retrieves one centre's slice at a time; confirmed live that the server
-// honors this filter genuinely server-side (a centre-scoped call reports
-// its OWN, smaller `total_records`, not the global figure) rather than
-// merely truncating a shared result client-side.
-export async function searchAcActivities(session: AcSession, params: { keyword: string; centerIds?: number[] }): Promise<AcActivitySearchResult> {
+// One raw activities/list request+parse, no retry logic — factored out so
+// searchAcActivities below can call it twice for exactly one narrow case.
+async function postActivitiesList(session: AcSession, keyword: string, centerIds?: number[]): Promise<AcActivitySearchResult> {
   const json = await acPost<{ headers: { page_info?: { total_records?: number; total_records_per_page?: number } }; body: { activity_items: AcActivityItem[] } }>(
     session,
     "activities/list",
     {
-      activity_search_pattern: activitySearchPattern({ keyword: params.keyword, centerIds: params.centerIds, forMap: false }),
+      activity_search_pattern: activitySearchPattern({ keyword, centerIds, forMap: false }),
       activity_transfer_pattern: {},
     },
   );
@@ -235,6 +230,47 @@ export async function searchAcActivities(session: AcSession, params: { keyword: 
     totalRecords: json.headers.page_info?.total_records ?? json.body.activity_items.length,
     recordsPerPage: json.headers.page_info?.total_records_per_page ?? json.body.activity_items.length,
   };
+}
+
+// `centerIds` (Aurora Source Reliability phase) is optional and defaults to
+// `[]` (every center) — the exact behavior every existing caller already
+// gets. Populating it is how the centre-partition fallback in ../index.ts
+// retrieves one centre's slice at a time; confirmed live that the server
+// honors this filter genuinely server-side (a centre-scoped call reports
+// its OWN, smaller `total_records`, not the global figure) rather than
+// merely truncating a shared result client-side.
+//
+// Contradictory-response guard (Aurora Source Reliability phase, real
+// repeated live testing 2026-08-30): Aurora's ActiveCommunities backend was
+// found to sometimes return total_records > 0 (real content genuinely
+// exists) alongside items: [] (nothing actually returned) — reproduced on a
+// single, plain, sequential call, no concurrency involved (~1 in 10 calls
+// during that session). Left unguarded, this is indistinguishable from a
+// real "zero results" response to every caller above this function,
+// including the Completion Gate in ../index.ts, whose own trigger requires
+// items.length > 0 and so never even sees this case as suspicious — a
+// production refresh could silently accept it as "no drop-in content this
+// keyword" when the opposite is true. `total_records === 0 && items.length
+// === 0` is untouched — that is a genuine, valid empty result and is never
+// second-guessed. For the contradictory case only, exactly one immediate
+// retry is attempted (no delay, no backoff, no general retry policy for
+// anything else). If the retry repeats the same contradiction, this throws
+// — fail closed, the same discipline the Completion Gate itself already
+// uses — so a production refresh preserves the previous known-good
+// snapshot instead of activating an implausibly small one.
+export async function searchAcActivities(session: AcSession, params: { keyword: string; centerIds?: number[] }): Promise<AcActivitySearchResult> {
+  const first = await postActivitiesList(session, params.keyword, params.centerIds);
+  if (!(first.totalRecords > 0 && first.items.length === 0)) return first;
+
+  const retry = await postActivitiesList(session, params.keyword, params.centerIds);
+  if (retry.totalRecords > 0 && retry.items.length === 0) {
+    const centreLabel = params.centerIds?.length ? ` centre ${params.centerIds.join(",")}` : "";
+    throw new Error(
+      `activecommunities client: "${params.keyword}"${centreLabel} activities/list reported total_records=${retry.totalRecords} but returned zero ` +
+        `items, on both the original request and one immediate retry — refusing to treat this contradictory response as a genuine empty result`,
+    );
+  }
+  return retry;
 }
 
 export type AcMapPoint = {

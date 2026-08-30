@@ -176,12 +176,27 @@ async function fetchCappedKeywordViaCentrePartition(
     );
   }
 
-  const partitions: CentrePartition[] = await Promise.all(
-    map.mapPoints.map(async (point) => {
-      const { items, totalRecords, recordsPerPage } = await searchAcActivities(session, { keyword, centerIds: [point.id] });
-      return { centerId: point.id, items, totalRecords, recordsPerPage };
-    }),
-  );
+  // Sequential, not Promise.all — real-production-refresh verification
+  // (2026-08-30) found concurrent per-centre requests against Aurora's
+  // shared session/cookie intermittently unreliable: a centre's own
+  // response would report the correct `total_records` in its headers but
+  // return an EMPTY `items` array, caught live by the completeness
+  // cross-check below (merged 18 of a claimed 27). Reproduced directly:
+  // 2 of 3 concurrent trials failed this way against the live endpoint;
+  // 3 of 3 sequential trials against the same endpoint succeeded. This
+  // points to session-scoped state on Aurora's ActiveCommunities backend
+  // that doesn't handle overlapping requests on one session reliably —
+  // not a flaw in the partitioning logic itself, which the Completion
+  // Gate and this same cross-check already proved correct by refusing the
+  // corrupted result rather than shipping it. Sequential requests cost a
+  // few hundred ms more per keyword (at most a handful of centres); no
+  // retries/delays/timeouts added — the evidence supports sequencing
+  // alone, nothing else.
+  const partitions: CentrePartition[] = [];
+  for (const point of map.mapPoints) {
+    const { items, totalRecords, recordsPerPage } = await searchAcActivities(session, { keyword, centerIds: [point.id] });
+    partitions.push({ centerId: point.id, items, totalRecords, recordsPerPage });
+  }
 
   return mergeCentrePartitions(config, keyword, originalTotalRecords, partitions);
 }
