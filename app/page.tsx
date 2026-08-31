@@ -203,19 +203,33 @@ function daysAgoLabel(raw: string): string {
 // case. `centre` is a required field on every Session (never empty), so a
 // human-readable "venue name, address, municipality" query is available for
 // every real session today — and is what actually resolves to a properly
-// labeled Google Maps place, exactly what a person would type in
-// themselves. This is a real accuracy improvement, not just a prettier
-// label: a well-known public venue's own listed address is at least as
-// reliable a destination as a raw lat/long, and text search additionally
-// benefits from Google's own place-matching rather than dropping a pin at a
-// bare coordinate. Coordinates remain a real fallback — reachable today only
-// if a future source somehow supplies latitude/longitude without a usable
-// centre name, which no current source does, but the type system doesn't
-// guarantee that forever.
-function directionsUrl(s: Session): string {
+// labeled place, exactly what a person would type in themselves. This is a
+// real accuracy improvement, not just a prettier label: a well-known public
+// venue's own listed address is at least as reliable a destination as a raw
+// lat/long, and text search additionally benefits from each provider's own
+// place-matching rather than dropping a pin at a bare coordinate.
+//
+// POST-QA Polish 01 — shared across both map providers below (previously
+// Google-Maps-only), so a chooser can offer more than one provider without
+// duplicating or diverging the underlying destination logic. Priority,
+// audited against real production data across all 7 municipalities: (1)
+// centre + address + municipality when address exists (Toronto/Vaughan/
+// Markham/Newmarket — effectively 100% of those); (2) centre + municipality
+// when address is missing (Mississauga/Richmond Hill/Aurora's common case);
+// coordinates are a secondary precision signal each provider URL builder
+// attaches in its own way below, never the primary query — reachable as a
+// sole signal today only for the ~3.7% of sessions with neither address nor
+// coordinates, where the last-resort municipality-only query is unavoidable
+// without a geocoding service this project has deliberately not added.
+function directionsQuery(s: Session): string | null {
   const placeParts = [s.centre, s.address, s.municipality].filter(Boolean);
-  if (placeParts.length > 0) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeParts.join(", "))}`;
+  return placeParts.length > 0 ? placeParts.join(", ") : null;
+}
+
+function googleMapsUrl(s: Session): string {
+  const query = directionsQuery(s);
+  if (query) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
   }
   if (s.latitude !== undefined && s.longitude !== undefined) {
     return `https://www.google.com/maps/search/?api=1&query=${s.latitude},${s.longitude}`;
@@ -223,13 +237,26 @@ function directionsUrl(s: Session): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.municipality)}`;
 }
 
-// Future navigation improvement, not built this pass (would need either a
-// map-provider preference setting or platform/user-agent sniffing to guess
-// intent — real complexity, not a safe one-line addition here): on mobile,
-// DropIn should eventually let a user open Directions in their own
-// preferred map app (Apple Maps, Google Maps, Waze) rather than always
-// assuming Google Maps. Documented here as a known follow-up, not
-// implemented.
+// Apple Maps' own documented web-link format (maps.apple.com, no app
+// required to resolve — falls back to Apple's own web map): `q` is the
+// human-readable search text Apple's place-matching uses, `ll` is a
+// coordinate hint Apple's own docs describe as a precision aid alongside
+// `q`, not a replacement for it — same "name/address primary, coordinates
+// secondary" priority as Google above, expressed in Apple's own parameter
+// shape rather than a second, diverging destination format.
+function appleMapsUrl(s: Session): string {
+  const query = directionsQuery(s);
+  const hasCoordinates = s.latitude !== undefined && s.longitude !== undefined;
+  if (query) {
+    const params = new URLSearchParams({ q: query });
+    if (hasCoordinates) params.set("ll", `${s.latitude},${s.longitude}`);
+    return `https://maps.apple.com/?${params.toString()}`;
+  }
+  if (hasCoordinates) {
+    return `https://maps.apple.com/?ll=${s.latitude},${s.longitude}`;
+  }
+  return `https://maps.apple.com/?q=${encodeURIComponent(s.municipality)}`;
+}
 
 // Phase 4.2 — real user geolocation, kept entirely separate from
 // persistentLocation/locationOverride above: those represent an explicit
@@ -587,6 +614,13 @@ export default function SearchSurface() {
   // onClick below), matching how every other sheet in this app already
   // behaves — never a stacked/simultaneous-sheets pattern.
   const [privacySheetOpen, setPrivacySheetOpen] = useState(false);
+  // POST-QA Polish 01 — mobile-only map-provider chooser, opened on top of
+  // the still-open Activity Detail sheet rather than replacing it (unlike
+  // About/Privacy's mutually-exclusive pattern above): the user needs to
+  // come back to the same Activity Detail state after picking a provider,
+  // not lose it. See the Directions anchor's onClick and the chooser Sheet
+  // below for the rest of this mechanism.
+  const [mapChooserOpen, setMapChooserOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   // Persistent location context (set only by a pure-location search) vs. a
   // one-time override (set by a mixed activity+location search). The pill
@@ -616,6 +650,7 @@ export default function SearchSurface() {
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const directionsRef = useRef<HTMLAnchorElement>(null);
+  const appleMapsLinkRef = useRef<HTMLAnchorElement>(null);
 
   useEffect(() => {
     const stored = window.localStorage.getItem("dropin-results-density");
@@ -1933,6 +1968,15 @@ export default function SearchSurface() {
       <Sheet
         open={!!selectedSession}
         onClose={() => {
+          // POST-QA Polish 01 — while the map-provider chooser sits open on
+          // top of this sheet (both have `open: true` simultaneously, since
+          // the chooser is meant to sit ON this sheet, not replace it the
+          // way Privacy replaces About), Escape fires both sheets' own
+          // independent keydown listeners at once. This no-ops Activity
+          // Detail's own close so only the topmost (chooser) sheet actually
+          // closes — the chooser's own onClose below is unaffected and
+          // still runs normally.
+          if (mapChooserOpen) return;
           setSelectedSession(null);
           setShareCopied(false);
         }}
@@ -2015,11 +2059,30 @@ export default function SearchSurface() {
               </div>
             )}
 
+            {/* POST-QA Polish 01 — the real href always points at Google
+                Maps (the same default this always had), so a hard
+                navigation, long-press "open in new tab," or JS-disabled
+                fallback still lands somewhere sensible. On mobile viewports
+                only (matching Sheet.tsx's own `md:` breakpoint — a
+                responsive-layout check, not user-agent/platform sniffing:
+                every visitor below that width sees the same two providers,
+                regardless of actual OS), the click is intercepted and opens
+                a small provider-choice Sheet instead of navigating
+                directly, since a phone is where "which map app" is a real
+                question — desktop has no installed map apps to choose
+                between, so it keeps this exact one-click behavior
+                unchanged. */}
             <a
               ref={directionsRef}
-              href={directionsUrl(selectedSession)}
+              href={googleMapsUrl(selectedSession)}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => {
+                if (window.matchMedia("(max-width: 767px)").matches) {
+                  e.preventDefault();
+                  setMapChooserOpen(true);
+                }
+              }}
               className="mt-5 grid w-full grid-cols-[20px_1fr_20px] items-center gap-3 rounded-xl bg-sage-text px-4 py-3 text-sm font-semibold text-white transition-all duration-150 ease-out hover:bg-sage-text/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
             >
               <DirectionsIcon className="h-5 w-5" />
@@ -2088,6 +2151,60 @@ export default function SearchSurface() {
               {[daysAgoLabel(selectedSession.lastUpdated), selectedSession.officialSource].filter(Boolean).join(" · ")}
             </p>
           </>
+        )}
+      </Sheet>
+
+      {/* ===================== MAP PROVIDER CHOOSER =====================
+          POST-QA Polish 01 — mobile-only, opened by the Directions anchor
+          above instead of navigating directly. Deliberately stacks ON TOP
+          of the still-open Activity Detail sheet (both have `open: true`
+          at once) rather than replacing it the way Privacy replaces About,
+          since dismissing this one needs to return to the exact same
+          Activity Detail state, not to the page underneath. Reuses Sheet
+          exactly as-is — see the Activity Detail Sheet's own onClose above
+          for the one small accommodation this stacking needs (Escape would
+          otherwise close both sheets at once). Launch v1 offers Apple Maps
+          and Google Maps only — no Waze (weaker venue-name matching, a
+          third option to physically verify for marginal launch benefit),
+          no installed-app detection (not reliably available to a web page),
+          no remembered preference (a simple always-ask chooser is enough
+          for launch; see docs/LAUNCH_READINESS_PLAN.md for the fuller
+          reasoning). */}
+      <Sheet
+        open={mapChooserOpen}
+        onClose={() => setMapChooserOpen(false)}
+        titleId="map-chooser-title"
+        desktopVariant="modal"
+        narrow
+        initialFocusRef={appleMapsLinkRef}
+        titleSlot={
+          <h2 id="map-chooser-title" className="text-[18px] font-bold text-text-primary">
+            Open directions with
+          </h2>
+        }
+      >
+        {selectedSession && (
+          <div className="mt-2 flex flex-col gap-2">
+            <a
+              ref={appleMapsLinkRef}
+              href={appleMapsUrl(selectedSession)}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setMapChooserOpen(false)}
+              className="flex h-12 items-center justify-center rounded-xl border border-border text-sm font-semibold text-text-primary transition-colors duration-150 ease-out hover:bg-hover-surface hover:text-sage-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
+            >
+              Apple Maps
+            </a>
+            <a
+              href={googleMapsUrl(selectedSession)}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setMapChooserOpen(false)}
+              className="flex h-12 items-center justify-center rounded-xl border border-border text-sm font-semibold text-text-primary transition-colors duration-150 ease-out hover:bg-hover-surface hover:text-sage-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text focus-visible:ring-offset-2 active:scale-[0.98]"
+            >
+              Google Maps
+            </a>
+          </div>
         )}
       </Sheet>
 
@@ -2289,8 +2406,8 @@ export default function SearchSurface() {
 
         <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Other websites</h3>
         <p className="mt-1 text-sm text-text-secondary">
-          DropIn links to official municipal websites and to Google Maps for directions. Those services
-          have their own privacy practices.
+          DropIn links to official municipal websites and to your chosen map app for directions. Those
+          services have their own privacy practices.
         </p>
 
         <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Contact</h3>
