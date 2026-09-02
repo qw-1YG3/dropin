@@ -23,6 +23,8 @@
 // error. fetchAllPerfectMindClasses returns `complete: false` whenever the
 // safety cap fires first, and callers (../perfectmind/index.ts) must treat
 // that as a hard failure, not a partial success.
+import { addDays, localMidnight, toDateKey } from "../../time";
+
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -33,6 +35,13 @@ const RETRY_BASE_DELAY_MS = 1000;
 // for the densest category tested; this leaves real headroom above that
 // while still bounding worst-case cost against a misbehaving response.
 const MAX_PAGES_PER_CATEGORY = 40;
+// DropIn's current user-facing product commitment is a 7-day quick-
+// navigation window. The 30-day source horizon intentionally provides
+// generous operational headroom without fetching unbounded far-future
+// municipal programming. Rolls forward from each refresh's own "today" —
+// see fetchAllPerfectMindClasses, which computes the actual end-date bound
+// once per pull, rather than a fixed calendar date here.
+const HORIZON_DAYS = 30;
 
 class CookieJar {
   private cookies = new Map<string, string>();
@@ -125,6 +134,7 @@ async function fetchClassesPageOnce(
   session: PmSession,
   calendarId: string,
   startDateIso: string,
+  endDateIso: string,
 ): Promise<{ outcome: "ok"; data: ClassesV2Response } | { outcome: "retryable"; status: number | string } | { outcome: "fatal"; error: string }> {
   const body = new URLSearchParams();
   body.set("calendarId", calendarId);
@@ -132,7 +142,7 @@ async function fetchClassesPageOnce(
   body.set("page", "0");
   body.set("values[0][Name]", "Date Range");
   body.set("values[0][Value]", `${startDateIso}T00:00:00.000Z`);
-  body.set("values[0][Value2]", "2027-06-30T00:00:00.000Z");
+  body.set("values[0][Value2]", `${endDateIso}T00:00:00.000Z`);
   body.set("values[0][ValueKind]", "6");
   body.set("__RequestVerificationToken", session.csrfToken);
 
@@ -169,11 +179,11 @@ async function fetchClassesPageOnce(
   }
 }
 
-async function fetchClassesPageWithRetry(session: PmSession, calendarId: string, startDateIso: string): Promise<ClassesV2Response> {
+async function fetchClassesPageWithRetry(session: PmSession, calendarId: string, startDateIso: string, endDateIso: string): Promise<ClassesV2Response> {
   let attempt = 0;
   let lastStatus: number | string = "unknown";
   while (attempt <= MAX_RETRIES) {
-    const result = await fetchClassesPageOnce(session, calendarId, startDateIso);
+    const result = await fetchClassesPageOnce(session, calendarId, startDateIso, endDateIso);
     if (result.outcome === "ok") return result.data;
     if (result.outcome === "fatal") throw new Error(`perfectmind client: fatal response for calendar ${calendarId} at ${startDateIso}: ${result.error}`);
     lastStatus = result.status;
@@ -201,9 +211,13 @@ export async function fetchAllPerfectMindClasses(session: PmSession, calendarId:
   const records: PmClass[] = [];
   let cursor = startDateIso;
   let requestCount = 0;
+  // Computed once, from the pull's own start date — not the advancing
+  // cursor — so the horizon stays a fixed 30 days from "today" for the
+  // whole pull, same local-midnight semantics as the rest of the app.
+  const endDateIso = toDateKey(addDays(localMidnight(startDateIso), HORIZON_DAYS));
 
   for (let page = 0; page < MAX_PAGES_PER_CATEGORY; page++) {
-    const data = await fetchClassesPageWithRetry(session, calendarId, cursor);
+    const data = await fetchClassesPageWithRetry(session, calendarId, cursor, endDateIso);
     requestCount++;
     const classes = data.classes ?? [];
     records.push(...classes);

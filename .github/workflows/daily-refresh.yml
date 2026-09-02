@@ -77,7 +77,10 @@ jobs:
         id: refresh
         run: |
           set +e
-          npm run refresh:data -- --all --json > refresh-output.json
+          # Calls the underlying script directly, not `npm run` (whose own
+          # command banner was confirmed to land in stdout ahead of the
+          # real JSON payload, breaking format-summary.ts's JSON.parse).
+          npx tsx scripts/refresh/index.ts --all --json > refresh-output.json
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
           set -e
           cat refresh-output.json
