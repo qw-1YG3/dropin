@@ -1267,14 +1267,28 @@ export default function SearchSurface() {
   // always at least get back to the app itself, even without a link to
   // this exact activity. Never includes the user's own device location —
   // nothing below reads userLocation/coordinates, by construction.
+  //
+  // POST-QA Polish 02B — a dedicated Share investigation (real production
+  // data across all 7 municipalities, comparing two actual consecutive
+  // daily refreshes) confirmed `id` is genuinely unstable for Toronto and
+  // Mississauga specifically — together ~91% of all sessions — so the
+  // "future improvement" above stays exactly that, a future improvement,
+  // not built here. What this pass DOES fix: `navigator.share`'s three
+  // fields were all carrying the same blob (`text` duplicated the title
+  // `navigator.share` already renders separately). `title`/`text`/`url` now
+  // have distinct roles — `text` is time+venue only, never the name again.
+  // The clipboard fallback is a genuinely different string, not the same
+  // one reused: unlike `navigator.share`, a pasted clipboard string gets no
+  // separate title treatment from whatever it's pasted into, so it needs
+  // the activity name inline to stand alone.
   async function handleShare(s: Session) {
     const displayName = displayActivityName(s);
     const timeText = timeLabel(s, computeStatus(s, liveNow), now);
-    const shareText = [displayName, timeText, s.centre, "", `View on DropIn: ${PUBLIC_SITE_URL}`].join("\n");
+    const venueText = s.address ? `${s.centre}, ${s.address}` : s.centre;
 
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
-        await navigator.share({ title: displayName, text: shareText, url: PUBLIC_SITE_URL });
+        await navigator.share({ title: displayName, text: [timeText, venueText].join("\n"), url: PUBLIC_SITE_URL });
       } catch {
         // User cancelled the native share sheet — not an error, nothing to do.
       }
@@ -1283,7 +1297,8 @@ export default function SearchSurface() {
 
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       try {
-        await navigator.clipboard.writeText(shareText);
+        const clipboardText = [displayName, timeText, venueText, "", `View on DropIn: ${PUBLIC_SITE_URL}`].join("\n");
+        await navigator.clipboard.writeText(clipboardText);
         setShareCopied(true);
         if (shareResetTimer.current) clearTimeout(shareResetTimer.current);
         shareResetTimer.current = setTimeout(() => setShareCopied(false), 1500);
