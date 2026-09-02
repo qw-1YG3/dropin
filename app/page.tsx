@@ -2413,6 +2413,19 @@ export default function SearchSurface() {
           no accounts to track.
         </p>
 
+        {/* Production Security & Privacy Readiness Audit — the one confirmed
+            P1 finding: hosting-provider request logging (standard for any
+            web host) was true in production but undisclosed. Provider-
+            neutral wording deliberately, so this stays accurate if hosting
+            ever changes — see that audit's own instruction not to name a
+            specific provider here. */}
+        <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Hosting &amp; technical logs</h3>
+        <p className="mt-1 text-sm text-text-secondary">
+          DropIn&rsquo;s hosting provider may automatically process standard technical information needed to
+          operate and secure the website, such as IP address, request path, browser/device information, and
+          timestamps. DropIn does not use this information for advertising or behavioral tracking.
+        </p>
+
         <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Feedback email</h3>
         <p className="mt-1 text-sm text-text-secondary">
           If you email us, the information you choose to share is handled through email — DropIn does not
