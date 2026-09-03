@@ -264,3 +264,22 @@ body {
     opacity: 0;
   }
 }
+
+/* Sheet.tsx's open-time autofocus marks its own target with
+   [data-autofocus-pointer] for exactly one moment: a pointer/touch-
+   triggered sheet open, where WebKit's :focus-visible heuristic can
+   mistake the resulting programmatic focus() for a keyboard interaction
+   (see the `lastInputModality` comment in Sheet.tsx for the full
+   mechanism). This rule suppresses only that one ambiguous ring/outline —
+   the attribute is removed on the element's next blur, so a later, real
+   keyboard Tab to the same element repaints its focus-visible ring
+   completely normally. Written unlayered (outside Tailwind's own
+   `@layer utilities`) so it reliably wins regardless of the exact
+   specificity of whichever ring/outline utility a given consumer uses.
+   The `*` covers rings applied to a focused element's own child (e.g. the
+   Close button's inner span), not just the focused element itself. */
+[data-autofocus-pointer]:focus-visible,
+[data-autofocus-pointer]:focus-visible * {
+  outline: none !important;
+  box-shadow: none !important;
+}

@@ -18,6 +18,40 @@ const EXIT_DURATION_MS = 200;
 // far it feels unresponsive). Anything less snaps back rather than closing.
 const SWIPE_DISMISS_THRESHOLD_PX = 80;
 
+// Pre-launch UX/accessibility fix — physical-device QA found a persistent
+// sage focus ring around the About sheet's Close button on a touch-
+// triggered open. Root cause: the open-time autofocus below calls
+// `.focus()` on the initial-focus target from a `useEffect`, one task after
+// the pointer interaction that opened the sheet — a script-driven focus
+// move detached enough from its causing event that WebKit's own
+// :focus-visible heuristic sometimes can't tell it apart from a keyboard
+// interaction, and paints a keyboard-style ring for a touch tap. There is
+// no standard API to force a browser's own :focus-visible determination
+// off for one script-driven focus() call, so this tracks real input events
+// ourselves (not the user agent, not per-platform branching) as the one
+// signal every browser gives unambiguously: a `keydown` unambiguously means
+// keyboard; a `pointerdown` unambiguously means mouse/touch. The open-time
+// autofocus effect below reads this once, at the moment it focuses its
+// target, and marks that target with `data-autofocus-pointer` only when the
+// open was pointer-triggered — see globals.css for the matching, narrowly-
+// scoped rule that suppresses just that one ambiguous ring. A later,
+// genuine keyboard Tab to the same element is a real `keydown`-caused focus
+// change that browsers already attribute correctly on their own, and is
+// completely unaffected by any of this.
+let lastInputModality: "keyboard" | "pointer" = "pointer";
+if (typeof document !== "undefined") {
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key !== "Alt" && e.key !== "Control" && e.key !== "Meta" && e.key !== "Shift") {
+        lastInputModality = "keyboard";
+      }
+    },
+    true,
+  );
+  document.addEventListener("pointerdown", () => { lastInputModality = "pointer"; }, true);
+}
+
 type SheetProps = {
   open: boolean;
   onClose: () => void;
@@ -140,7 +174,18 @@ export function Sheet({
 
   useEffect(() => {
     if (!open) return;
-    (initialFocusRef?.current ?? closeButtonRef.current)?.focus();
+    const focusTarget = initialFocusRef?.current ?? closeButtonRef.current;
+    if (focusTarget) {
+      // See the `lastInputModality` comment above SWIPE_DISMISS_THRESHOLD_PX
+      // for the full mechanism. Only marked for the pointer-triggered case;
+      // a keyboard-triggered open's autofocus is left completely alone,
+      // since native :focus-visible already handles that correctly.
+      if (lastInputModality === "pointer") {
+        focusTarget.setAttribute("data-autofocus-pointer", "");
+        focusTarget.addEventListener("blur", () => focusTarget.removeAttribute("data-autofocus-pointer"), { once: true });
+      }
+      focusTarget.focus();
+    }
 
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
