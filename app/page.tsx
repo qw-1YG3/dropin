@@ -2272,7 +2272,12 @@ export default function SearchSurface() {
           </button>
         </p>
 
-        <p className="mt-5 text-xs text-text-secondary/70">DropIn · v1.0</p>
+        {/* Release Versioning & Rollback Foundation — reads the build-time
+            constant next.config.ts inlines from package.json's own
+            `version` field (see docs/RELEASE_PROCESS.md), never a
+            hardcoded literal. Same quiet, secondary, non-interactive
+            treatment as before this change. */}
+        <p className="mt-5 text-xs text-text-secondary/70">DropIn · v{process.env.NEXT_PUBLIC_APP_VERSION}</p>
       </Sheet>
 
       {/* ===================== PRIVACY SHEET =====================
