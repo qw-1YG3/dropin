@@ -2359,7 +2359,7 @@ export default function SearchSurface() {
               setInfoSheetOpen(false);
               setPrivacySheetOpen(true);
             }}
-            className="text-sage-text underline underline-offset-2"
+            className="font-medium text-sage-text underline underline-offset-2"
           >
             See what DropIn does and doesn&rsquo;t collect.
           </button>
