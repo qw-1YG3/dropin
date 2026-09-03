@@ -587,15 +587,21 @@ export default function SearchSurface() {
   // next session someone opens.
   const [shareCopied, setShareCopied] = useState(false);
   const shareResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [infoSheetOpen, setInfoSheetOpen] = useState(false);
-  // Launch Readiness 1B — Privacy is its own Sheet instance rather than a
-  // section inside About: reuses the exact same overlay/motion/accessibility
-  // mechanism (smallest architectural change per that phase's own Part 14
-  // instruction) while keeping About from growing past a comfortable length.
-  // Only one of the two is ever open at a time (see the "Privacy" link's
-  // onClick below), matching how every other sheet in this app already
-  // behaves — never a stacked/simultaneous-sheets pattern.
-  const [privacySheetOpen, setPrivacySheetOpen] = useState(false);
+  // About → Privacy desktop flicker fix — these were previously two
+  // independently mounted Sheets (Launch Readiness 1B's original "smallest
+  // architectural change" instruction). The "Privacy" link inside About
+  // closed one and opened the other in the same click, which meant two
+  // separate backdrop/panel animation lifecycles ran simultaneously in
+  // opposite directions — invisible on mobile's off-screen bottom-sheet
+  // motion, but a visible brightness/scale flicker on desktop's centered
+  // modal, where both panels occupy the same screen position mid-
+  // transition. About and Privacy are both purely informational views in
+  // the same trust/privacy flow, so they now share ONE Sheet instance
+  // whose content swaps between views — the shell/backdrop never closes
+  // and reopens between them. Deliberately scoped to About/Privacy only;
+  // Activity Detail, Quick Action, and the date calendar are untouched.
+  type InfoSheetView = "about" | "privacy" | null;
+  const [infoSheetView, setInfoSheetView] = useState<InfoSheetView>(null);
   const [loading, setLoading] = useState(true);
   // Persistent location context (set only by a pure-location search) vs. a
   // one-time override (set by a mixed activity+location search). The pill
@@ -1327,7 +1333,7 @@ export default function SearchSurface() {
             <button
               type="button"
               aria-label="About DropIn"
-              onClick={() => setInfoSheetOpen(true)}
+              onClick={() => setInfoSheetView("about")}
               className="rounded-full p-1 text-text-secondary transition-all duration-150 ease-out hover:bg-hover-surface hover:text-sage-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-text active:scale-95"
             >
               <InfoIcon className="h-5 w-5" />
@@ -2136,232 +2142,241 @@ export default function SearchSurface() {
         onSelectDate={setSelectedDate}
       />
 
-      {/* ===================== PRODUCT INFORMATION SHEET =====================
+      {/* ===================== ABOUT / PRIVACY INFORMATIONAL SHEET =====================
           Bottom sheet on mobile, centered modal from md: up — the Search
           Surface stays visible behind the scrim in both cases, only the
           dialog's own position/shape changes.
-          Launch Readiness 1B — restructured from 5 content sections down to
-          4 (the old "Where does the information come from?" and "Data
-          sources" headings said almost the same thing twice; merged into
-          one) to make room for two new, real trust requirements
-          (Independent project, Privacy link) without making the sheet net
-          longer than before. "Built for easier local recreation" (pure
-          marketing restatement of the intro, no new operational
-          information) was cut rather than kept alongside the new content —
-          see docs/LAUNCH_READINESS_1A_TRUST_PRIVACY_FEEDBACK_AUDIT.md §3/§10. */}
+          Pre-launch desktop-flicker fix — About and Privacy used to be two
+          independently mounted Sheets (Launch Readiness 1B's original
+          design); the "Privacy" link inside About closed one and opened
+          the other in the same click, running two separate backdrop/panel
+          animation lifecycles simultaneously in opposite directions — a
+          visible flicker on desktop's centered modal (invisible on
+          mobile's off-screen bottom-sheet motion). One Sheet instance now
+          carries both views; `infoSheetView` selects which content
+          renders, and `open`/`onClose` are driven off "is a view active at
+          all" rather than two separate booleans, so the shell/backdrop
+          never closes and reopens when switching between them.
+          `scrollResetKey={infoSheetView}` resets the shared scroll
+          container to the top on every view switch (Sheet.tsx) — without
+          it, Privacy would open wherever About's scroll happened to be
+          left. Launch Readiness 1B — About restructured from 5 content
+          sections down to 4 (the old "Where does the information come
+          from?" and "Data sources" headings said almost the same thing
+          twice; merged into one) to make room for two new, real trust
+          requirements (Independent project, Privacy link) without making
+          the sheet net longer than before. "Built for easier local
+          recreation" (pure marketing restatement of the intro, no new
+          operational information) was cut rather than kept alongside the
+          new content — see docs/LAUNCH_READINESS_1A_TRUST_PRIVACY_FEEDBACK_AUDIT.md
+          §3/§10. Privacy content is limited to what fresh code inspection
+          actually verified (same audit §6) — nothing here describes
+          hosting infrastructure that doesn't exist yet, per that audit's
+          Part 16/§12. */}
       <Sheet
-        open={infoSheetOpen}
-        onClose={() => setInfoSheetOpen(false)}
-        titleId="info-sheet-title"
+        open={infoSheetView !== null}
+        onClose={() => setInfoSheetView(null)}
+        titleId={infoSheetView === "privacy" ? "privacy-sheet-title" : "info-sheet-title"}
         desktopVariant="modal"
-        // Same fix as the date calendar's title: puts "About DropIn" on the
+        scrollResetKey={infoSheetView}
+        // Same fix as the date calendar's title: puts the title on the
         // same row as Close instead of on its own line below an otherwise-
         // empty close-button row, which was both the misalignment and most
         // of the excess space above the title.
         titleSlot={
-          <h2 id="info-sheet-title" className="text-[18px] font-bold text-text-primary">
-            About DropIn
-          </h2>
+          infoSheetView === "privacy" ? (
+            <h2 id="privacy-sheet-title" className="text-[18px] font-bold text-text-primary">
+              Privacy
+            </h2>
+          ) : (
+            <h2 id="info-sheet-title" className="text-[18px] font-bold text-text-primary">
+              About DropIn
+            </h2>
+          )
         }
       >
-        <p className="mt-2 text-sm text-text-secondary">
-          DropIn makes it easier to discover drop-in recreation activities across participating GTA
-          municipalities, without searching multiple municipal recreation websites one by one. Search for
-          an activity, choose a day and time, and quickly see what&rsquo;s available nearby.
-        </p>
+        {infoSheetView === "privacy" ? (
+          <>
+            <p className="mt-2 text-sm text-text-secondary">No account is required to use DropIn.</p>
 
-        {/* Mobile UX Polish pass — physical-device QA found this sheet
-            readable but text-dense, everything at one flat level with no
-            sense of which facts belong together. Below, the three
-            previously-separate subsections that are really one topic
-            (where the data comes from, how current it is, and the
-            independent-project disclaimer) are grouped under a small,
-            deliberately UNDERSTATED label — smaller and more muted than the
-            subsection headings it groups, so it reads as a quiet category
-            marker rather than another heading of the same weight. That's
-            the specific thing being avoided: stacking four visually
-            identical headings in a row starts to read like a numbered
-            Terms & Conditions document, which this content should not feel
-            like. No accordion — every word remains visible and scannable,
-            exactly as before; only the grouping and spacing changed, never
-            the content itself. */}
-        <h3 className="mt-7 text-[11px] font-semibold uppercase tracking-wide text-text-secondary/50 md:mt-5">
-          Data &amp; accuracy
-        </h3>
-        <h3 className="mt-3 text-xs font-semibold text-sage-text">Where does the information come from?</h3>
-        <p className="mt-1 text-sm text-text-secondary">
-          DropIn organizes publicly available recreation schedules from official municipal sources —
-          currently {AVAILABLE_MUNICIPALITIES_LABEL}. We&rsquo;re working to bring in more municipalities
-          over time.
-        </p>
+            {/* Mobile UX Polish pass — same information architecture as before
+                (six sections, same order, same wording); only the gap above
+                each heading grows on mobile (mt-6, vs. the original mt-4 kept
+                unchanged on desktop via md:mt-4) for easier long-form reading
+                rhythm on a phone. No grouping change here — unlike About, this
+                hierarchy was already good and the task is spacing only. */}
+            <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Location</h3>
+            <p className="mt-1 text-sm text-text-secondary">
+              If you choose to use location-based features, your browser may ask for permission to access
+              your location. This is used to calculate distance to recreation facilities and to support
+              Nearest First sorting. Search works fully without it.
+            </p>
 
-        {/* Launch Readiness 1A found "We regularly refresh our listings"
-            overclaimed relative to the deployed reality (no production
-            scheduler exists yet — see docs/PHASE_3_3B_SCHEDULER_DEPLOYMENT_STRATEGY.md's
-            own "NOT CONFIGURED" finding, re-verified in that audit). This
-            wording deliberately makes no cadence claim at all — it points to
-            the real, existing per-listing "Updated ..." freshness label
-            instead of asserting a schedule DropIn can't yet back. Upgrade
-            only after a scheduler is genuinely deployed and verified. */}
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Keeping information current</h3>
-        <p className="mt-1 text-sm text-text-secondary">
-          Each listing shows when it was last updated. Municipal schedules, fees, and availability can
-          change, so we recommend checking the official listing before you head out.
-        </p>
+            <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Precise location storage</h3>
+            <p className="mt-1 text-sm text-text-secondary">
+              Your precise coordinates stay on your device. DropIn does not store them, does not place them in
+              URLs, and does not include them in Share content.
+            </p>
 
-        {/* Launch Readiness 1A/1B — the one explicit statement this needs;
-            deliberately not repeated on Result Cards or the Decision Sheet
-            (per-session officialSource attribution already provides that
-            local context — see the audit's §8). */}
-        <h3 className="mt-4 text-xs font-semibold text-sage-text">Independent project</h3>
-        <p className="mt-1 text-sm text-text-secondary">
-          DropIn is an independent project and is not affiliated with or endorsed by the municipalities
-          listed here. Their official recreation sources remain the authoritative source for schedules,
-          fees, eligibility, and availability.
-        </p>
+            <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Analytics &amp; cookies</h3>
+            <p className="mt-1 text-sm text-text-secondary">
+              DropIn does not currently use analytics, advertising tracking, or cookies for tracking, and has
+              no accounts to track.
+            </p>
 
-        {/* Launch Readiness 1B — replaces the old fake local-state Send flow
-            (see lib/dropin/contact.ts's own comment) with a real mailto:
-            link. DropIn cannot know whether the resulting email is actually
-            sent once the user's mail client takes over, so there is
-            deliberately no "sent"/confirmation state here — showing one
-            would be exactly the false claim this phase exists to remove.
-            The address itself stays visible right below the link (Part 13's
-            fallback requirement) for anyone without a configured mail
-            client.
-            mt-7/md:mt-4 (vs. the mt-4 every subsection above uses) — this is
-            a new top-level group, same weight as "Data & accuracy," so it
-            gets the same larger separation from what came before, not the
-            tighter within-group spacing those subsections share.
-            Post-QA polish — physical-device QA found the plain-text address
-            below was being auto-linkified/underlined by iOS Safari's own
-            data detectors, reading as a second, weaker "Email feedback"
-            competing with the real one above it. Now a real anchor with no
-            underline of its own, so Safari's detector has nothing left to
-            re-wrap; still the exact same mailto:, still visibly secondary
-            (text-xs vs. the CTA's text-sm font-medium) — only the
-            duplicate-looking underline and Safari's own faint styling are
-            gone, and the color is a touch less faded for readability. */}
-        <h3 className="mt-7 text-xs font-semibold text-sage-text md:mt-4">Feedback</h3>
-        <p className="mt-1 text-sm text-text-secondary">
-          Found something wrong or have an idea for DropIn? Let us know about incorrect information,
-          something that isn&rsquo;t working, or a suggestion.
-        </p>
-        <a
-          href={feedbackMailtoUrl()}
-          className="mt-1.5 inline-block text-sm font-medium text-sage-text underline underline-offset-2"
-        >
-          Email feedback
-        </a>
-        <a href={feedbackMailtoUrl()} className="mt-1 block text-xs text-text-secondary">
-          {PUBLIC_FEEDBACK_EMAIL}
-        </a>
+            {/* Production Security & Privacy Readiness Audit — the one confirmed
+                P1 finding: hosting-provider request logging (standard for any
+                web host) was true in production but undisclosed. Provider-
+                neutral wording deliberately, so this stays accurate if hosting
+                ever changes — see that audit's own instruction not to name a
+                specific provider here. */}
+            <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Hosting &amp; technical logs</h3>
+            <p className="mt-1 text-sm text-text-secondary">
+              DropIn&rsquo;s hosting provider may automatically process standard technical information needed to
+              operate and secure the website, such as IP address, request path, browser/device information, and
+              timestamps. DropIn does not use this information for advertising or behavioral tracking.
+            </p>
 
-        <h3 className="mt-7 text-xs font-semibold text-sage-text md:mt-4">Privacy</h3>
-        <p className="mt-1 text-sm text-text-secondary">
-          DropIn asks for very little.{" "}
-          <button
-            type="button"
-            onClick={() => {
-              setInfoSheetOpen(false);
-              setPrivacySheetOpen(true);
-            }}
-            className="font-medium text-sage-text underline underline-offset-2"
-          >
-            See what DropIn does and doesn&rsquo;t collect.
-          </button>
-        </p>
+            <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Feedback email</h3>
+            <p className="mt-1 text-sm text-text-secondary">
+              If you email us, the information you choose to share is handled through email — DropIn does not
+              store feedback in a database.
+            </p>
 
-        {/* Release Versioning & Rollback Foundation — reads the build-time
-            constant next.config.ts inlines from package.json's own
-            `version` field (see docs/RELEASE_PROCESS.md), never a
-            hardcoded literal. Same quiet, secondary, non-interactive
-            treatment as before this change. */}
-        <p className="mt-5 text-xs text-text-secondary/70">DropIn · v{process.env.NEXT_PUBLIC_APP_VERSION}</p>
-      </Sheet>
+            <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Other websites</h3>
+            <p className="mt-1 text-sm text-text-secondary">
+              DropIn links to official municipal websites and to Google Maps for directions. Those services
+              have their own privacy practices.
+            </p>
 
-      {/* ===================== PRIVACY SHEET =====================
-          Launch Readiness 1B, Part 14 — its own Sheet instance rather than
-          a section inside About: same reasoning as the comment above the
-          Product Information Sheet. Content is limited to what fresh code
-          inspection actually verified (docs/LAUNCH_READINESS_1A_TRUST_PRIVACY_FEEDBACK_AUDIT.md
-          §6) — nothing here describes hosting infrastructure that doesn't
-          exist yet, per that audit's Part 16/§12. */}
-      <Sheet
-        open={privacySheetOpen}
-        onClose={() => setPrivacySheetOpen(false)}
-        titleId="privacy-sheet-title"
-        desktopVariant="modal"
-        titleSlot={
-          <h2 id="privacy-sheet-title" className="text-[18px] font-bold text-text-primary">
-            Privacy
-          </h2>
-        }
-      >
-        <p className="mt-2 text-sm text-text-secondary">No account is required to use DropIn.</p>
+            <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Contact</h3>
+            <p className="mt-1 text-sm text-text-secondary">
+              Questions about privacy can be sent to{" "}
+              <a href={`mailto:${PUBLIC_CONTACT_EMAIL}`} className="text-sage-text underline underline-offset-2">
+                {PUBLIC_CONTACT_EMAIL}
+              </a>
+              .
+            </p>
 
-        {/* Mobile UX Polish pass — same information architecture as before
-            (six sections, same order, same wording); only the gap above
-            each heading grows on mobile (mt-6, vs. the original mt-4 kept
-            unchanged on desktop via md:mt-4) for easier long-form reading
-            rhythm on a phone. No grouping change here — unlike About, this
-            hierarchy was already good and the task is spacing only. */}
-        <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Location</h3>
-        <p className="mt-1 text-sm text-text-secondary">
-          If you choose to use location-based features, your browser may ask for permission to access
-          your location. This is used to calculate distance to recreation facilities and to support
-          Nearest First sorting. Search works fully without it.
-        </p>
+            <p className="mt-4 text-xs text-text-secondary/70">
+              This notice may be updated as DropIn&rsquo;s services evolve.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="mt-2 text-sm text-text-secondary">
+              DropIn makes it easier to discover drop-in recreation activities across participating GTA
+              municipalities, without searching multiple municipal recreation websites one by one. Search for
+              an activity, choose a day and time, and quickly see what&rsquo;s available nearby.
+            </p>
 
-        <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Precise location storage</h3>
-        <p className="mt-1 text-sm text-text-secondary">
-          Your precise coordinates stay on your device. DropIn does not store them, does not place them in
-          URLs, and does not include them in Share content.
-        </p>
+            {/* Mobile UX Polish pass — physical-device QA found this sheet
+                readable but text-dense, everything at one flat level with no
+                sense of which facts belong together. Below, the three
+                previously-separate subsections that are really one topic
+                (where the data comes from, how current it is, and the
+                independent-project disclaimer) are grouped under a small,
+                deliberately UNDERSTATED label — smaller and more muted than the
+                subsection headings it groups, so it reads as a quiet category
+                marker rather than another heading of the same weight. That's
+                the specific thing being avoided: stacking four visually
+                identical headings in a row starts to read like a numbered
+                Terms & Conditions document, which this content should not feel
+                like. No accordion — every word remains visible and scannable,
+                exactly as before; only the grouping and spacing changed, never
+                the content itself. */}
+            <h3 className="mt-7 text-[11px] font-semibold uppercase tracking-wide text-text-secondary/50 md:mt-5">
+              Data &amp; accuracy
+            </h3>
+            <h3 className="mt-3 text-xs font-semibold text-sage-text">Where does the information come from?</h3>
+            <p className="mt-1 text-sm text-text-secondary">
+              DropIn organizes publicly available recreation schedules from official municipal sources —
+              currently {AVAILABLE_MUNICIPALITIES_LABEL}. We&rsquo;re working to bring in more municipalities
+              over time.
+            </p>
 
-        <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Analytics &amp; cookies</h3>
-        <p className="mt-1 text-sm text-text-secondary">
-          DropIn does not currently use analytics, advertising tracking, or cookies for tracking, and has
-          no accounts to track.
-        </p>
+            {/* Launch Readiness 1A found "We regularly refresh our listings"
+                overclaimed relative to the deployed reality (no production
+                scheduler exists yet — see docs/PHASE_3_3B_SCHEDULER_DEPLOYMENT_STRATEGY.md's
+                own "NOT CONFIGURED" finding, re-verified in that audit). This
+                wording deliberately makes no cadence claim at all — it points to
+                the real, existing per-listing "Updated ..." freshness label
+                instead of asserting a schedule DropIn can't yet back. Upgrade
+                only after a scheduler is genuinely deployed and verified. */}
+            <h3 className="mt-4 text-xs font-semibold text-sage-text">Keeping information current</h3>
+            <p className="mt-1 text-sm text-text-secondary">
+              Each listing shows when it was last updated. Municipal schedules, fees, and availability can
+              change, so we recommend checking the official listing before you head out.
+            </p>
 
-        {/* Production Security & Privacy Readiness Audit — the one confirmed
-            P1 finding: hosting-provider request logging (standard for any
-            web host) was true in production but undisclosed. Provider-
-            neutral wording deliberately, so this stays accurate if hosting
-            ever changes — see that audit's own instruction not to name a
-            specific provider here. */}
-        <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Hosting &amp; technical logs</h3>
-        <p className="mt-1 text-sm text-text-secondary">
-          DropIn&rsquo;s hosting provider may automatically process standard technical information needed to
-          operate and secure the website, such as IP address, request path, browser/device information, and
-          timestamps. DropIn does not use this information for advertising or behavioral tracking.
-        </p>
+            {/* Launch Readiness 1A/1B — the one explicit statement this needs;
+                deliberately not repeated on Result Cards or the Decision Sheet
+                (per-session officialSource attribution already provides that
+                local context — see the audit's §8). */}
+            <h3 className="mt-4 text-xs font-semibold text-sage-text">Independent project</h3>
+            <p className="mt-1 text-sm text-text-secondary">
+              DropIn is an independent project and is not affiliated with or endorsed by the municipalities
+              listed here. Their official recreation sources remain the authoritative source for schedules,
+              fees, eligibility, and availability.
+            </p>
 
-        <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Feedback email</h3>
-        <p className="mt-1 text-sm text-text-secondary">
-          If you email us, the information you choose to share is handled through email — DropIn does not
-          store feedback in a database.
-        </p>
+            {/* Launch Readiness 1B — replaces the old fake local-state Send flow
+                (see lib/dropin/contact.ts's own comment) with a real mailto:
+                link. DropIn cannot know whether the resulting email is actually
+                sent once the user's mail client takes over, so there is
+                deliberately no "sent"/confirmation state here — showing one
+                would be exactly the false claim this phase exists to remove.
+                The address itself stays visible right below the link (Part 13's
+                fallback requirement) for anyone without a configured mail
+                client.
+                mt-7/md:mt-4 (vs. the mt-4 every subsection above uses) — this is
+                a new top-level group, same weight as "Data & accuracy," so it
+                gets the same larger separation from what came before, not the
+                tighter within-group spacing those subsections share.
+                Post-QA polish — physical-device QA found the plain-text address
+                below was being auto-linkified/underlined by iOS Safari's own
+                data detectors, reading as a second, weaker "Email feedback"
+                competing with the real one above it. Now a real anchor with no
+                underline of its own, so Safari's detector has nothing left to
+                re-wrap; still the exact same mailto:, still visibly secondary
+                (text-xs vs. the CTA's text-sm font-medium) — only the
+                duplicate-looking underline and Safari's own faint styling are
+                gone, and the color is a touch less faded for readability. */}
+            <h3 className="mt-7 text-xs font-semibold text-sage-text md:mt-4">Feedback</h3>
+            <p className="mt-1 text-sm text-text-secondary">
+              Found something wrong or have an idea for DropIn? Let us know about incorrect information,
+              something that isn&rsquo;t working, or a suggestion.
+            </p>
+            <a
+              href={feedbackMailtoUrl()}
+              className="mt-1.5 inline-block text-sm font-medium text-sage-text underline underline-offset-2"
+            >
+              Email feedback
+            </a>
+            <a href={feedbackMailtoUrl()} className="mt-1 block text-xs text-text-secondary">
+              {PUBLIC_FEEDBACK_EMAIL}
+            </a>
 
-        <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Other websites</h3>
-        <p className="mt-1 text-sm text-text-secondary">
-          DropIn links to official municipal websites and to Google Maps for directions. Those services
-          have their own privacy practices.
-        </p>
+            <h3 className="mt-7 text-xs font-semibold text-sage-text md:mt-4">Privacy</h3>
+            <p className="mt-1 text-sm text-text-secondary">
+              DropIn asks for very little.{" "}
+              <button
+                type="button"
+                onClick={() => setInfoSheetView("privacy")}
+                className="font-medium text-sage-text underline underline-offset-2"
+              >
+                See what DropIn does and doesn&rsquo;t collect.
+              </button>
+            </p>
 
-        <h3 className="mt-6 text-xs font-semibold text-sage-text md:mt-4">Contact</h3>
-        <p className="mt-1 text-sm text-text-secondary">
-          Questions about privacy can be sent to{" "}
-          <a href={`mailto:${PUBLIC_CONTACT_EMAIL}`} className="text-sage-text underline underline-offset-2">
-            {PUBLIC_CONTACT_EMAIL}
-          </a>
-          .
-        </p>
-
-        <p className="mt-4 text-xs text-text-secondary/70">
-          This notice may be updated as DropIn&rsquo;s services evolve.
-        </p>
+            {/* Release Versioning & Rollback Foundation — reads the build-time
+                constant next.config.ts inlines from package.json's own
+                `version` field (see docs/RELEASE_PROCESS.md), never a
+                hardcoded literal. Same quiet, secondary, non-interactive
+                treatment as before this change. */}
+            <p className="mt-5 text-xs text-text-secondary/70">DropIn · v{process.env.NEXT_PUBLIC_APP_VERSION}</p>
+          </>
+        )}
       </Sheet>
     </main>
   );

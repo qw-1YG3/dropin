@@ -93,6 +93,17 @@ type SheetProps = {
    * Information.
    */
   narrow?: boolean;
+  /**
+   * About → Privacy desktop flicker fix — for a single Sheet instance that
+   * swaps between multiple content "views" without closing/reopening (see
+   * the About/Privacy call site), the internal scroll container otherwise
+   * keeps whatever offset the previous view was left at, since it's the
+   * same DOM node, never remounted. Passing a value that changes when the
+   * view changes (e.g. the view name itself) resets that scroll position
+   * to the top on every view switch. Leave unset for every other
+   * consumer — it only resets scroll once, harmlessly, on initial mount.
+   */
+  scrollResetKey?: string | number | null;
 };
 
 // One overlay mechanism shared by the Quick Action Sheet and the Product
@@ -108,8 +119,10 @@ export function Sheet({
   initialFocusRef,
   titleSlot,
   narrow = false,
+  scrollResetKey,
 }: SheetProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const isModal = desktopVariant === "modal";
 
   // Mirrors `open`, but lags behind on the close transition so the sheet
@@ -194,6 +207,13 @@ export function Sheet({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open, onClose]);
 
+  // See the `scrollResetKey` prop comment above. Runs on initial mount too
+  // (harmless — a freshly rendered container is already at scrollTop 0),
+  // and again whenever the key actually changes, e.g. About → Privacy.
+  useEffect(() => {
+    containerRef.current?.scrollTo(0, 0);
+  }, [scrollResetKey]);
+
   if (!shouldRender) return null;
 
   return (
@@ -210,6 +230,7 @@ export function Sheet({
         }`}
       />
       <div
+        ref={containerRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
