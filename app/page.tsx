@@ -49,17 +49,13 @@ import type { Session } from "@/lib/dropin/types";
 
 const SUGGESTION_POOL = ["Badminton", "Pickleball", "Basketball", "Swimming", "Lane Swim", "Leisure Swim", "Yoga", "Open Gym", "Table Tennis"];
 
-// Mobile UX Polish pass — the current stable production URL, used in Share
+// Custom Domain P1 Cleanup — the canonical production URL, used in Share
 // content so a recipient can find their way back to DropIn (see
-// handleShare below). Deliberately points at the real, live Vercel
-// deployment (`https://getdropin.vercel.app`) rather than `getdropin.ca` —
-// the custom domain is registered and used for email routing already
-// (lib/dropin/contact.ts), but is NOT yet attached to the deployed app
-// (see docs/PHASE_5B_PRODUCTION_INFRASTRUCTURE_PREFLIGHT.md §10), so a
-// share link pointing at it would not resolve to anything today. Update
-// this one constant when the custom domain is attached — no other file
-// references a DropIn site URL.
-const PUBLIC_SITE_URL = "https://getdropin.vercel.app";
+// handleShare below). `getdropin.ca` is the attached, live custom domain
+// (getdropin.vercel.app remains reachable but is no longer the canonical
+// public-facing address) — this is the one place that value is
+// duplicated as a literal; no other file references a DropIn site URL.
+const PUBLIC_SITE_URL = "https://getdropin.ca";
 
 // Real, grounded examples only — every activity and district named here is
 // actually supported, so the rotation never implies a search that wouldn't
